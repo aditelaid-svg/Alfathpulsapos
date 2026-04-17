@@ -75,5 +75,11 @@ service cloud.firestore {
       allow create: if isAuthenticated() && request.auth.uid == userId;
       allow update: if isAdmin(); // Only Bos approves or changes roles
     }
+
+    match /handovers/{handoverId} {
+      allow read: if isAdmin();
+      allow create: if isEmployee();
+      allow delete: if isAdmin();
+    }
   }
 }

@@ -4,10 +4,11 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import * as XLSX from 'xlsx';
 import { db, auth } from './firebase';
-import { collection, onSnapshot, addDoc, serverTimestamp, doc, setDoc, updateDoc, getDoc, deleteDoc } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, serverTimestamp, doc, setDoc, updateDoc, getDoc, deleteDoc, query, where } from 'firebase/firestore';
 import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
-import { LayoutDashboard, ShoppingCart, Package, Store, Settings, Plus, ChevronRight, Hash, QrCode, UserCheck, ShieldAlert, MapPin, Trash2, Camera, X, Sparkles, ArrowLeftRight, RotateCcw, FileText, History, LogOut, TrendingUp, Wallet, PieChart, Activity, Coins } from 'lucide-react';
+import { Sun, Moon, LayoutDashboard, ShoppingCart, Package, Store, Settings, Plus, ChevronRight, Hash, QrCode, UserCheck, ShieldAlert, MapPin, Trash2, Camera, X, Sparkles, ArrowLeftRight, RotateCcw, FileText, History, LogOut, TrendingUp, Wallet, PieChart, Activity, Coins, FileSpreadsheet, AlertTriangle } from 'lucide-react';
 import CameraScanner from './components/CameraScanner';
 
 enum OperationType {
@@ -117,6 +118,9 @@ export default function App() {
   const [disposalConfig, setDisposalConfig] = useState({ productId: '', variantId: '', sns: [] as string[], reason: 'broken' });
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [lastTransaction, setLastTransaction] = useState<any>(null);
+  const [handovers, setHandovers] = useState<any[]>([]);
+  const [showHandoverModal, setShowHandoverModal] = useState(false);
+  const [handoverConfig, setHandoverConfig] = useState({ cash: 0, notes: '', shift: 'siang' });
 
   const providersList = ['Telkomsel', 'Indosat', 'XL', 'Axis', 'Three', 'Smartfren', 'Lainnya'];
   const brandsList = ['Robot', 'Vivan', 'Baseus', 'Oppo', 'Samsung', 'Vivo', 'Xiaomi', 'Rexi', 'Foomee', 'Lainnya'];
@@ -131,6 +135,13 @@ export default function App() {
       minimumFractionDigits: 0,
       maximumFractionDigits: 0
     }).format(num);
+  };
+
+  const exportToExcel = (data: any[], fileName: string) => {
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Laporan");
+    XLSX.writeFile(workbook, `${fileName}.xlsx`);
   };
 
   useEffect(() => {
@@ -174,6 +185,65 @@ export default function App() {
           setConfirmModal(prev => ({ ...prev, show: false }));
         } catch (error) {
           handleFirestoreError(error, OperationType.DELETE, `products/${productId}`);
+        }
+      }
+    });
+  };
+
+  const handleReturnTransaction = async (tx: any) => {
+    setConfirmModal({
+      show: true,
+      title: "Konfirmasi Retur",
+      message: `Anda akan melakukan retur untuk transaksi senilai ${formatRupiah(tx.totalAmount)}. Stok barang akan otomatis dikembalikan ke inventaris cabang. Lanjutkan?`,
+      confirmText: "Ya, Retur",
+      onConfirm: async () => {
+        try {
+          // 1. Mark transaction as returned
+          await updateDoc(doc(db, 'transactions', tx.id), {
+            status: 'returned',
+            returnedAt: serverTimestamp(),
+            returnedBy: auth.currentUser?.uid,
+            returnedByName: userData?.name
+          });
+
+          // 2. Restore stock for each item
+          const updates: any = {};
+          tx.items.forEach((item: any) => {
+            const key = `${item.productId}_${item.variantId}`;
+            if (!updates[key]) updates[key] = [];
+            updates[key].push(item.sn);
+          });
+
+          for (const key in updates) {
+            const snList = updates[key];
+            const itemRef = doc(db, `branches/${tx.branchId}/inventory`, key);
+            
+            // Note: We need the LATEST data from DB to avoid race conditions
+            const snap = await getDoc(itemRef);
+            if (snap.exists()) {
+              const currentSns = snap.data().sns || [];
+              const newSns = [...new Set([...currentSns, ...snList])]; // Ensure no duplicates just in case
+              await updateDoc(itemRef, {
+                sns: newSns,
+                stock: newSns.length,
+                lastUpdated: serverTimestamp()
+              });
+            } else {
+              // If somehow the inventory record was deleted, recreate it
+              await setDoc(itemRef, {
+                productId: key.split('_')[0],
+                variantId: key.split('_')[1],
+                sns: snList,
+                stock: snList.length,
+                lastUpdated: serverTimestamp()
+              });
+            }
+          }
+
+          setPosStatus({ message: "Transaksi Berhasil Diretur!", type: 'success' });
+          setConfirmModal(prev => ({ ...prev, show: false }));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.UPDATE, `transactions/${tx.id}`);
         }
       }
     });
@@ -265,17 +335,30 @@ export default function App() {
         });
       }
 
-      const unsubTransactions = onSnapshot(collection(db, 'transactions'), (snapshot) => {
-        setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      });
+      let unsubTransactions = () => {};
+      let unsubTransfers = () => {};
+      let unsubDisposals = () => {};
+      let unsubHandovers = () => {};
 
-      const unsubTransfers = onSnapshot(collection(db, 'transfers'), (snapshot) => {
-        setTransfers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      });
-
-      const unsubDisposals = onSnapshot(collection(db, 'disposals'), (snapshot) => {
-        setDisposals(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      });
+      if (userData?.role === 'admin') {
+        unsubTransactions = onSnapshot(collection(db, 'transactions'), (snapshot) => {
+          setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        });
+        unsubTransfers = onSnapshot(collection(db, 'transfers'), (snapshot) => {
+          setTransfers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        });
+        unsubDisposals = onSnapshot(collection(db, 'disposals'), (snapshot) => {
+          setDisposals(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        });
+        unsubHandovers = onSnapshot(collection(db, 'handovers'), (snapshot) => {
+          setHandovers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        });
+      } else if (userData?.branchId) {
+        // Employees only listen to their branch transactions
+        unsubTransactions = onSnapshot(query(collection(db, 'transactions'), where('branchId', '==', userData.branchId)), (snapshot) => {
+          setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        });
+      }
 
       return () => { 
         unsubProducts(); 
@@ -284,6 +367,7 @@ export default function App() {
         unsubTransactions(); 
         unsubTransfers(); 
         unsubDisposals(); 
+        unsubHandovers();
       };
     }
   }, [userData, selectedBranch]);
@@ -815,13 +899,37 @@ export default function App() {
       );
     }
 
+    const allInventory = Object.entries(branchInventory).map(([key, value]: [string, any]) => ({
+      key,
+      ...value
+    }));
+
+    const lowStockAlerts = allInventory.filter(inv => {
+      const product = products.find(p => p.id === inv.productId);
+      if (!product) return false;
+      const variant = product.variants?.find((v: any) => v.id === inv.variantId);
+      if (!variant) return false;
+      return inv.stock <= (variant.minStock || 0);
+    }).map(inv => {
+      const product = products.find(p => p.id === inv.productId);
+      const variant = product?.variants?.find((v: any) => v.id === inv.variantId);
+      const branchName = branches.find(b => b.id === inv.branchId)?.name || 'Unknown';
+      return {
+        ...inv,
+        productName: product?.name,
+        variantName: variant?.name || variant?.description,
+        minStock: variant?.minStock,
+        branchName
+      };
+    });
+
     switch (activeMenu) {
       case 'dashboard':
         const dailyTx = transactions.filter(t => {
           const txDate = t.timestamp?.toDate().toDateString();
           const today = new Date().toDateString();
           const isToday = txDate === today;
-          if (!isToday) return false;
+          if (!isToday || t.status === 'returned') return false;
           
           // If admin, show all today's transactions for global report
           // If employee, only their branch
@@ -832,7 +940,7 @@ export default function App() {
         const branchDailyTx = transactions.filter(t => {
           const txDate = t.timestamp?.toDate().toDateString();
           const today = new Date().toDateString();
-          return txDate === today && t.branchId === selectedBranch;
+          return txDate === today && t.branchId === selectedBranch && t.status !== 'returned';
         });
         const branchTotalDaily = branchDailyTx.reduce((acc, curr) => acc + curr.totalAmount, 0);
         const branchProfitDaily = branchDailyTx.reduce((acc, curr) => acc + (curr.totalProfit || 0), 0);
@@ -840,56 +948,34 @@ export default function App() {
         const totalDaily = dailyTx.reduce((acc, curr) => acc + curr.totalAmount, 0);
         const profitDaily = dailyTx.reduce((acc, curr) => acc + (curr.totalProfit || 0), 0);
 
-        const allInventory = Object.entries(branchInventory).map(([key, value]: [string, any]) => ({
-          key,
-          ...value
-        }));
-
-        const lowStockAlerts = allInventory.filter(inv => {
-          const product = products.find(p => p.id === inv.productId);
-          if (!product) return false;
-          const variant = product.variants?.find((v: any) => v.id === inv.variantId);
-          if (!variant) return false;
-          return inv.stock <= (variant.minStock || 0);
-        }).map(inv => {
-          const product = products.find(p => p.id === inv.productId);
-          const variant = product?.variants?.find((v: any) => v.id === inv.variantId);
-          return {
-            ...inv,
-            productName: product?.name,
-            variantName: variant?.name || variant?.description,
-            minStock: variant?.minStock
-          };
-        });
-
         if (userData?.role === 'admin') {
           return (
             <div className="space-y-6 pb-10">
-              {/* TOP HEADER & BRANCH SELECTOR */}
               <div className="flex justify-between items-center px-1">
-                 <div>
-                    <h2 className="text-xl font-black text-white tracking-widest uppercase">Admin Panel</h2>
-                    <p className="text-[10px] text-text-dim uppercase font-bold tracking-widest">Dashboard Kendali Sistem</p>
-                 </div>
-                 <select 
-                    className="bg-gray-800 text-[10px] border border-glass-border px-3 py-2 rounded-xl focus:outline-none focus:border-accent-blue/50 text-white font-bold"
-                    value={selectedBranch || ''}
-                    onChange={e => setSelectedBranch(e.target.value)}
-                  >
-                    {branches.sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric: true})).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                  </select>
+                <div>
+                  <h2 className="text-xl font-black text-white tracking-widest uppercase">Admin Panel</h2>
+                  <p className="text-[10px] text-text-dim uppercase font-bold tracking-widest">Dashboard Kendali Sistem</p>
+                </div>
+                <select 
+                  className="bg-gray-800 text-[10px] border border-glass-border px-3 py-2 rounded-xl focus:outline-none focus:border-accent-blue/50 text-white font-bold"
+                  value={selectedBranch || ''}
+                  onChange={e => setSelectedBranch(e.target.value)}
+                >
+                  {branches.sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric: true})).map(b => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
               </div>
 
-              {/* SECTION: FINANCIAL REPORT */}
               <div className="glass-card p-4 border-white/10 bg-gradient-to-br from-white/[0.03] to-transparent space-y-4">
                 <div className="flex items-center justify-between">
-                   <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-lg bg-green-500/20 text-green-500 flex items-center justify-center">
-                         <TrendingUp size={18} />
-                      </div>
-                      <h3 className="text-xs font-black text-white uppercase tracking-widest">Laporan Keuangan Global</h3>
-                   </div>
-                   <span className="text-[8px] font-bold text-green-500 bg-green-500/10 px-2 py-1 rounded-full uppercase tracking-tighter animate-pulse">Hari Ini</span>
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg bg-green-500/20 text-green-500 flex items-center justify-center">
+                      <TrendingUp size={18} />
+                    </div>
+                    <h3 className="text-xs font-black text-white uppercase tracking-widest">Laporan Keuangan Global</h3>
+                  </div>
+                  <span className="text-[8px] font-bold text-green-500 bg-green-500/10 px-2 py-1 rounded-full uppercase tracking-tighter animate-pulse">Hari Ini</span>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -897,10 +983,9 @@ export default function App() {
                     <p className="text-[10px] font-bold text-text-dim uppercase tracking-[0.2em]">Omset Seluruh Cabang</p>
                     <p className="text-2xl font-black text-white tracking-tighter">{formatRupiah(totalDaily)}</p>
                     <div className="flex items-center gap-2 mt-2">
-                       <span className="text-[9px] font-black bg-blue-500 text-white px-2 py-0.5 rounded uppercase tracking-tighter">{dailyTx.length} Transaksi Terjadi</span>
+                      <span className="text-[9px] font-black bg-blue-500 text-white px-2 py-0.5 rounded uppercase tracking-tighter">{dailyTx.length} Transaksi Terjadi</span>
                     </div>
                   </div>
-                  
                   <div className="space-y-1 bg-green-500/5 p-3 rounded-2xl border border-green-500/10">
                     <div className="flex items-center gap-2 mb-1">
                       <Wallet size={12} className="text-green-500" />
@@ -912,138 +997,93 @@ export default function App() {
                 </div>
 
                 <div className="pt-4 border-t border-white/5 grid grid-cols-2 gap-4">
-                   <div className="space-y-2">
-                      <div className="flex justify-between items-center">
-                         <span className="text-[9px] font-bold text-text-dim uppercase tracking-widest">Aktivitas Global</span>
-                      </div>
-                      <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
-                         <div className="bg-blue-500 h-full" style={{ width: `${Math.min(100, (dailyTx.length / 100) * 100)}%` }}></div>
-                      </div>
-                   </div>
-                   <div className="space-y-2">
-                      <div className="flex justify-between items-center">
-                         <span className="text-[9px] font-bold text-text-dim uppercase tracking-widest">Laba vs Omset</span>
-                      </div>
-                      <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
-                         <div className="bg-green-500 h-full" style={{ width: `${totalDaily > 0 ? (profitDaily / totalDaily) * 100 : 0}%` }}></div>
-                      </div>
-                   </div>
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[9px] font-bold text-text-dim uppercase tracking-widest">Aktivitas Global</span>
+                    </div>
+                    <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
+                      <div className="bg-blue-500 h-full" style={{ width: `${Math.min(100, (dailyTx.length / 100) * 100)}%` }}></div>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[9px] font-bold text-text-dim uppercase tracking-widest">Laba vs Omset</span>
+                    </div>
+                    <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
+                      <div className="bg-green-500 h-full" style={{ width: `${totalDaily > 0 ? (profitDaily / totalDaily) * 100 : 0}%` }}></div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              {/* BRANCH SPECIFIC DRILL-DOWN */}
               <div className="space-y-3">
-                 <div className="flex justify-between items-center px-1">
-                    <h3 className="text-[10px] font-bold text-text-dim uppercase tracking-[0.2em]">Status Cabang: {branches.find(b => b.id === selectedBranch)?.name}</h3>
-                    <div className="flex items-center gap-1">
-                       <span className="w-1.5 h-1.5 rounded-full bg-accent-blue animate-pulse"></span>
-                       <span className="text-[8px] font-bold text-accent-blue uppercase tracking-widest">Live View</span>
-                    </div>
-                 </div>
-
-                 <div className="grid grid-cols-2 gap-3">
-                    <div className="glass-card p-3 border-white/5 bg-white/[0.02]">
-                       <p className="text-[8px] font-bold text-text-dim uppercase tracking-widest mb-1">Omset Cabang</p>
-                       <p className="text-lg font-black text-white">{formatRupiah(branchTotalDaily)}</p>
-                    </div>
-                    <div className="glass-card p-3 border-white/5 bg-white/[0.02]">
-                       <p className="text-[8px] font-bold text-text-dim uppercase tracking-widest mb-1">Laba Cabang</p>
-                       <p className="text-lg font-black text-green-500">{formatRupiah(branchProfitDaily)}</p>
-                    </div>
-                 </div>
+                <div className="flex justify-between items-center px-1">
+                  <h3 className="text-[10px] font-bold text-text-dim uppercase tracking-[0.2em]">Status Cabang: {branches.find(b => b.id === selectedBranch)?.name}</h3>
+                  <div className="flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-accent-blue animate-pulse"></span>
+                    <span className="text-[8px] font-bold text-accent-blue uppercase tracking-widest">Live View</span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="glass-card p-3 border-white/5 bg-white/[0.02]">
+                    <p className="text-[8px] font-bold text-text-dim uppercase tracking-widest mb-1">Omset Cabang</p>
+                    <p className="text-lg font-black text-white">{formatRupiah(branchTotalDaily)}</p>
+                  </div>
+                  <div className="glass-card p-3 border-white/5 bg-white/[0.02]">
+                    <p className="text-[8px] font-bold text-text-dim uppercase tracking-widest mb-1">Laba Cabang</p>
+                    <p className="text-lg font-black text-green-500">{formatRupiah(branchProfitDaily)}</p>
+                  </div>
+                </div>
               </div>
 
-              {/* SECTION: INVENTORY STATUS & ALERTS */}
-              <div className="grid grid-cols-1 gap-4">
-                 {lowStockAlerts.length > 0 && (
-                   <div className="glass-card p-4 border-red-500/30 bg-red-500/5 space-y-3 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <ShieldAlert size={18} className="text-red-500 animate-pulse" />
-                          <h3 className="text-xs font-black text-red-500 uppercase tracking-widest">Peringatan Stok Menipis</h3>
-                        </div>
-                        <span className="px-2 py-0.5 bg-red-500 text-white text-[9px] font-black rounded-full uppercase tracking-tighter">{lowStockAlerts.length} SKU</span>
+              <div className="space-y-3">
+                <div className="flex justify-between items-center px-1">
+                  <h3 className="text-[10px] font-bold text-text-dim uppercase tracking-[0.2em]">Logistik Cabang</h3>
+                  <Activity size={14} className="text-accent-blue" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="glass-card p-4 border-white/10 hover:border-accent-blue/30 transition-colors cursor-pointer group">
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="w-8 h-8 rounded-lg bg-accent-blue/10 flex items-center justify-center text-accent-blue group-hover:scale-110 transition-transform">
+                        <Package size={18} />
                       </div>
-                      
-                      <div className="space-y-3 max-h-[220px] overflow-y-auto pr-2 custom-scrollbar">
-                         {lowStockAlerts.map((item: any, idx) => (
-                           <div key={idx} className="flex justify-between items-center bg-black/40 p-3 rounded-xl border border-white/5 hover:border-red-500/30 transition-colors">
-                              <div className="flex-1">
-                                 <p className="text-[11px] font-black text-white uppercase tracking-tight line-clamp-1">{item.productName}</p>
-                                 <p className="text-[9px] text-accent-blue font-bold uppercase tracking-tighter">{item.variantName}</p>
-                              </div>
-                              <div className="text-right pl-4">
-                                 <div className="flex items-center justify-end gap-1">
-                                    <p className={`text-xs font-black ${item.stock === 0 ? 'text-red-500' : 'text-yellow-500'}`}>{item.stock}</p>
-                                    <Package size={10} className="text-text-dim" />
-                                 </div>
-                                 <p className="text-[7px] text-text-dim uppercase font-bold tracking-tighter">Min Limit: {item.minStock || 5}</p>
-                              </div>
-                           </div>
-                         ))}
+                      <PieChart size={14} className="text-text-dim" />
+                    </div>
+                    <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest mb-1">Total Unit Stok</p>
+                    <p className="text-xl font-black tracking-tighter text-white">
+                      {Object.values(branchInventory).reduce((acc: number, curr: any) => acc + (curr.stock || 0), 0)}
+                    </p>
+                  </div>
+                  <div className="glass-card p-4 border-white/10 hover:border-accent-blue/30 transition-colors cursor-pointer group">
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="w-8 h-8 rounded-lg bg-yellow-500/10 flex items-center justify-center text-yellow-500 group-hover:scale-110 transition-transform">
+                        <ShoppingCart size={18} />
                       </div>
-                      <button 
-                         onClick={() => setActiveMenu('products')}
-                         className="w-full py-3 bg-red-500/10 border border-red-500/20 text-red-500 text-[10px] font-black uppercase tracking-[0.2em] rounded-xl hover:bg-red-500 hover:text-white transition-all"
-                      >
-                         Restock Sekarang
-                      </button>
-                   </div>
-                 )}
-
-                 {/* BRANCH SUMMARY CARDS */}
-                 <div className="space-y-3">
-                    <div className="flex justify-between items-center px-1">
-                       <h3 className="text-[10px] font-bold text-text-dim uppercase tracking-[0.2em]">Logistik Cabang</h3>
-                       <Activity size={14} className="text-accent-blue" />
+                      <Activity size={14} className="text-text-dim" />
                     </div>
-                    
-                    <div className="grid grid-cols-2 gap-3">
-                       <div className="glass-card p-4 border-white/10 hover:border-accent-blue/30 transition-colors cursor-pointer group">
-                          <div className="flex justify-between items-start mb-2">
-                             <div className="w-8 h-8 rounded-lg bg-accent-blue/10 flex items-center justify-center text-accent-blue group-hover:scale-110 transition-transform">
-                                <Package size={18} />
-                             </div>
-                             <PieChart size={14} className="text-text-dim" />
-                          </div>
-                          <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest mb-1">Total Unit Stok</p>
-                          <p className="text-xl font-black tracking-tighter text-white">
-                             {Object.values(branchInventory).reduce((acc: number, curr: any) => acc + (curr.stock || 0), 0)}
-                          </p>
-                       </div>
-
-                       <div className="glass-card p-4 border-white/10 hover:border-accent-blue/30 transition-colors cursor-pointer group">
-                          <div className="flex justify-between items-start mb-2">
-                             <div className="w-8 h-8 rounded-lg bg-yellow-500/10 flex items-center justify-center text-yellow-500 group-hover:scale-110 transition-transform">
-                                <ShoppingCart size={18} />
-                             </div>
-                             <Activity size={14} className="text-text-dim" />
-                          </div>
-                          <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest mb-1">Total SKU Unik</p>
-                          <p className="text-xl font-black tracking-tighter text-white">
-                             {Object.keys(branchInventory).length}
-                          </p>
-                       </div>
+                    <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest mb-1">Total SKU Unik</p>
+                    <p className="text-xl font-black tracking-tighter text-white">
+                      {Object.keys(branchInventory).length}
+                    </p>
+                  </div>
+                </div>
+                <div className="glass-card p-4 border-white/10 flex items-center justify-between bg-white/[0.02]">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500">
+                      <Store size={20} />
                     </div>
-
-                    <div className="glass-card p-4 border-white/10 flex items-center justify-between bg-white/[0.02]">
-                       <div className="flex items-center gap-4">
-                          <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500">
-                             <Store size={20} />
-                          </div>
-                          <div>
-                             <p className="text-[11px] font-black text-white uppercase tracking-tight">Status Operasional</p>
-                             <div className="flex items-center gap-2 mt-1">
-                                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                                <span className="text-[9px] text-green-500 font-bold uppercase tracking-widest">Sistem Online</span>
-                             </div>
-                          </div>
-                       </div>
-                       <button onClick={() => setActiveMenu('system')} className="p-3 bg-white/5 rounded-xl border border-white/10 text-white hover:bg-white/10">
-                          < ChevronRight size={18} />
-                       </button>
+                    <div>
+                      <p className="text-[11px] font-black text-white uppercase tracking-tight">Status Operasional</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                        <span className="text-[9px] text-green-500 font-bold uppercase tracking-widest">Sistem Online</span>
+                      </div>
                     </div>
-                 </div>
+                  </div>
+                  <button onClick={() => setActiveMenu('system')} className="p-3 bg-white/5 rounded-xl border border-white/10 text-white hover:bg-white/10">
+                    <ChevronRight size={18} />
+                  </button>
+                </div>
               </div>
             </div>
           );
@@ -1080,6 +1120,22 @@ export default function App() {
                <p className="text-2xl font-black tracking-tight text-white relative z-10">{formatRupiah(branchDailyRevenue)}</p>
                <p className="text-[8px] text-accent-blue/70 relative z-10 uppercase font-bold mt-2 tracking-widest italic">Target per hari: Capai omset maksimal!</p>
             </section>
+
+            <button 
+               onClick={() => setShowHandoverModal(true)}
+               className="w-full bg-white/5 border border-white/10 p-4 rounded-3xl flex items-center justify-between group hover:border-accent-blue/50 transition-all"
+            >
+               <div className="flex items-center gap-3">
+                 <div className="w-10 h-10 rounded-2xl bg-accent-blue/10 text-accent-blue flex items-center justify-center group-hover:scale-110 transition-transform">
+                   <RotateCcw size={20} />
+                 </div>
+                 <div className="text-left">
+                   <p className="text-[11px] font-black text-white uppercase tracking-tight">Oper Shift / Serah Terima</p>
+                   <p className="text-[8px] text-text-dim font-bold uppercase tracking-widest">Selesaikan Sesi Jaga Anda</p>
+                 </div>
+               </div>
+               <ChevronRight size={18} className="text-text-dim" />
+            </button>
           </div>
         );
       case 'system':
@@ -1272,6 +1328,88 @@ export default function App() {
                       </div>
                     </div>
                   ))}
+                </div>
+
+                {/* HANDOVER HISTORY */}
+                <div className="space-y-3 mt-8">
+                   <div className="flex items-center justify-between px-1">
+                      <h3 className="text-[10px] font-bold text-text-dim uppercase tracking-widest">Riwayat Serah Terima Shift</h3>
+                      <History size={14} className="text-accent-blue" />
+                   </div>
+                   
+                   <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1 custom-scrollbar">
+                      {handovers.length === 0 ? (
+                        <div className="p-8 text-center text-text-dim text-[10px] uppercase font-bold border border-dashed border-white/10 rounded-2xl">
+                           Belum ada data serah terima.
+                        </div>
+                      ) : (
+                        handovers
+                          .sort((a, b) => (b.timestamp?.toDate() || 0) - (a.timestamp?.toDate() || 0))
+                          .map(h => (
+                          <div key={h.id} className="glass-card p-3 border-white/5 space-y-3">
+                             <div className="flex justify-between items-start">
+                                <div>
+                                   <div className="flex items-center gap-2">
+                                      <p className="text-xs font-black text-white uppercase">{h.employeeName}</p>
+                                      <span className={`text-[7px] px-1 rounded uppercase font-black ${h.shift === 'siang' ? 'bg-yellow-500 text-black' : 'bg-purple-500 text-white'}`}>
+                                         {h.shift}
+                                      </span>
+                                   </div>
+                                   <p className="text-[8px] text-text-dim font-bold uppercase tracking-tighter">
+                                      {h.timestamp?.toDate().toLocaleString('id-ID')} • {branches.find(b => b.id === h.branchId)?.name}
+                                   </p>
+                                </div>
+                                <div className="text-right">
+                                   <p className={`text-xs font-black ${h.diff < 0 ? 'text-red-500' : h.diff > 0 ? 'text-green-500' : 'text-accent-blue'}`}>
+                                      {h.diff === 0 ? 'Sesuai' : (h.diff > 0 ? '+' : '') + formatRupiah(h.diff)}
+                                   </p>
+                                   <p className="text-[7px] text-text-dim uppercase font-bold">Selisih Kas</p>
+                                </div>
+                             </div>
+
+                             <div className="grid grid-cols-2 gap-2 pb-2 border-b border-white/5">
+                                <div className="bg-white/5 p-2 rounded-lg">
+                                   <p className="text-[7px] text-text-dim uppercase font-bold">Voucher</p>
+                                   <p className="text-[10px] font-black">{formatRupiah(h.totalVoucher)}</p>
+                                </div>
+                                <div className="bg-white/5 p-2 rounded-lg text-right">
+                                   <p className="text-[7px] text-text-dim uppercase font-bold">Aksesoris</p>
+                                   <p className="text-[10px] font-black text-accent-blue">{formatRupiah(h.totalAksesoris)}</p>
+                                </div>
+                             </div>
+
+                             <div className="flex justify-between items-center px-1">
+                                <div className="text-left">
+                                   <p className="text-[7px] text-text-dim uppercase font-bold">Uang Fisik Diterima</p>
+                                   <p className="text-xs font-black text-white">{formatRupiah(h.cashReported)}</p>
+                                </div>
+                                {h.notes && (
+                                   <div className="text-right italic text-[8px] text-text-dim max-w-[50%]">
+                                      "{h.notes}"
+                                   </div>
+                                )}
+                             </div>
+                             
+                             <button 
+                                onClick={() => {
+                                   setConfirmModal({
+                                      show: true,
+                                      title: "Hapus Log",
+                                      message: "Hapus riwayat serah terima ini?",
+                                      onConfirm: async () => {
+                                         await deleteDoc(doc(db, 'handovers', h.id));
+                                         setConfirmModal(prev => ({...prev, show: false}));
+                                      }
+                                   })
+                                }}
+                                className="w-full py-1.5 bg-red-500/10 text-red-500 text-[8px] font-black uppercase tracking-widest rounded-lg"
+                             >
+                                Hapus Riwayat
+                             </button>
+                          </div>
+                        ))
+                      )}
+                   </div>
                 </div>
               </section>
             )}
@@ -2211,10 +2349,12 @@ export default function App() {
                     variantName: item.variantName,
                     price: item.price,
                     modal: item.modal || 0,
+                    category: item.category,
                     provider: item.provider
                   })),
                   totalAmount: totalCart,
                   totalProfit: cart.reduce((acc, curr) => acc + (curr.price - (curr.modal || 0)), 0),
+                  status: 'success',
                   timestamp: serverTimestamp()
                 };
 
@@ -2325,6 +2465,199 @@ export default function App() {
             )}
           </div>
         );
+      case 'restock':
+        return (
+          <div className="space-y-6 pb-20">
+            <div className="flex justify-between items-center bg-red-500/5 p-6 rounded-3xl border border-red-500/20">
+              <div>
+                <h2 className="text-2xl font-black text-white tracking-tighter flex items-center gap-2">
+                  <AlertTriangle size={24} className="text-red-500" /> STOK MENIPIS
+                </h2>
+                <p className="text-[10px] text-red-500 font-bold uppercase tracking-widest mt-1 opacity-70 italic">Semua Cabang • Perlu Segera Diisi</p>
+              </div>
+              <button 
+                onClick={() => {
+                  const data = lowStockAlerts.map(item => ({
+                    'Cabang': item.branchName,
+                    'Produk': item.productName,
+                    'Varian': item.variantName,
+                    'Stok Saat Ini': item.stock,
+                    'Batas Minimal': item.minStock || 5,
+                    'Status': item.stock === 0 ? 'HABIS' : 'KRITIS'
+                  }));
+                  exportToExcel(data, `Laporan_Restok_${new Date().toLocaleDateString()}`);
+                }}
+                className="bg-red-500 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-red-500/20 active:scale-95 transition flex items-center gap-2"
+              >
+                <FileSpreadsheet size={16} /> Export Excel
+              </button>
+            </div>
+
+            <div className="overflow-x-auto rounded-3xl border border-white/5 bg-black/20">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-white/5">
+                    <th className="p-4 text-[9px] font-black text-text-dim uppercase tracking-widest border-b border-white/5">Cabang</th>
+                    <th className="p-4 text-[9px] font-black text-text-dim uppercase tracking-widest border-b border-white/5">Nama Barang</th>
+                    <th className="p-4 text-[9px] font-black text-text-dim uppercase tracking-widest border-b border-white/5">Varian</th>
+                    <th className="p-4 text-[9px] font-black text-text-dim uppercase tracking-widest border-b border-white/5 text-center">Stok</th>
+                    <th className="p-4 text-[9px] font-black text-text-dim uppercase tracking-widest border-b border-white/5 text-center">Batas</th>
+                    <th className="p-4 text-[9px] font-black text-text-dim uppercase tracking-widest border-b border-white/5 text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {lowStockAlerts.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="p-12 text-center text-text-dim text-[10px] font-bold uppercase italic tracking-widest">
+                        Semua stok di semua cabang masih aman.
+                      </td>
+                    </tr>
+                  ) : lowStockAlerts.sort((a,b) => a.stock - b.stock).map((item, idx) => (
+                    <tr key={idx} className="hover:bg-white/5 transition-colors">
+                      <td className="p-4">
+                        <span className="text-[10px] font-black text-accent-blue bg-accent-blue/10 px-2 py-1 rounded-lg uppercase">{item.branchName}</span>
+                      </td>
+                      <td className="p-4">
+                        <p className="text-[10px] font-black text-white uppercase">{item.productName}</p>
+                      </td>
+                      <td className="p-4">
+                        <p className="text-[10px] text-text-dim font-bold uppercase">{item.variantName}</p>
+                      </td>
+                      <td className="p-4 text-center">
+                        <span className={`text-xs font-black ${item.stock <= 2 ? 'text-red-500' : 'text-yellow-500'}`}>
+                          {item.stock}
+                        </span>
+                      </td>
+                      <td className="p-4 text-center">
+                        <span className="text-[10px] text-text-dim font-mono">{item.minStock || 5}</span>
+                      </td>
+                      <td className="p-4 text-center">
+                        {item.stock === 0 ? (
+                          <span className="text-[8px] bg-red-500 text-white px-2 py-1 rounded-full font-black uppercase tracking-tighter shadow-lg shadow-red-500/20">Habis Total</span>
+                        ) : (
+                          <span className="text-[8px] bg-yellow-500/20 text-yellow-500 border border-yellow-500/20 px-2 py-1 rounded-full font-black uppercase tracking-tighter">Kritis</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      case 'reports':
+        return (
+          <div className="space-y-6 pb-20">
+            <div className="flex justify-between items-center bg-accent-blue/5 p-6 rounded-3xl border border-accent-blue/20">
+              <div>
+                <h2 className="text-2xl font-black text-white tracking-tighter flex items-center gap-2">
+                  <FileSpreadsheet size={24} className="text-accent-blue" /> REKAP PENGHASILAN
+                </h2>
+                <p className="text-[10px] text-accent-blue font-bold uppercase tracking-widest mt-1 opacity-70 italic">Semua Cabang • Berdasarkan Serah Terima</p>
+              </div>
+              <button 
+                onClick={() => {
+                  const data = handovers.map(h => ({
+                    'Cabang': branches.find(b => b.id === h.branchId)?.name || 'Unknown',
+                    'Tanggal': h.timestamp?.toDate().toLocaleDateString('id-ID'),
+                    'Karyawan': h.employeeName,
+                    'Shift': h.shift.toUpperCase(),
+                    'Jam Oper Sif': h.timestamp?.toDate().toLocaleTimeString('id-ID'),
+                    'Omset Voucher': h.totalVoucher,
+                    'Omset Aksesoris': h.totalAksesoris,
+                    'Total Hitung': h.totalCalculated,
+                    'Uang Fisik': h.cashReported,
+                    'Selisih': h.diff,
+                    'Catatan': h.notes || '-'
+                  }));
+                  exportToExcel(data, `Rekap_Penghasilan_${new Date().toLocaleDateString()}`);
+                }}
+                className="bg-accent-blue text-gray-900 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-accent-blue/20 active:scale-95 transition flex items-center gap-2"
+              >
+                <Plus size={16} /> Download Excel
+              </button>
+            </div>
+
+            <div className="grid gap-6">
+              {branches.map(branch => {
+                const branchHandover = handovers
+                  .filter(h => h.branchId === branch.id)
+                  .sort((a, b) => (b.timestamp?.toDate() || 0) - (a.timestamp?.toDate() || 0));
+
+                return (
+                  <div key={branch.id} className="space-y-3">
+                    <div className="flex items-center gap-3 px-1">
+                      <div className="w-1.5 h-6 bg-accent-blue rounded-full"></div>
+                      <h3 className="text-sm font-black text-white uppercase tracking-tight">{branch.name}</h3>
+                      <span className="text-[8px] text-text-dim font-bold uppercase tracking-widest bg-white/5 px-2 py-1 rounded-lg">
+                        {branchHandover.length} Sesi Tercatat
+                      </span>
+                    </div>
+
+                    <div className="overflow-x-auto rounded-3xl border border-white/5 bg-black/20">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-white/5">
+                            <th className="p-4 text-[9px] font-black text-text-dim uppercase tracking-widest border-b border-white/5">Waktu Oper</th>
+                            <th className="p-4 text-[9px] font-black text-text-dim uppercase tracking-widest border-b border-white/5 text-center">Shift</th>
+                            <th className="p-4 text-[9px] font-black text-text-dim uppercase tracking-widest border-b border-white/5">Karyawan</th>
+                            <th className="p-4 text-[9px] font-black text-text-dim uppercase tracking-widest border-b border-white/5 text-right">Voucher</th>
+                            <th className="p-4 text-[9px] font-black text-text-dim uppercase tracking-widest border-b border-white/5 text-right">Aksesoris</th>
+                            <th className="p-4 text-[9px] font-black text-text-dim uppercase tracking-widest border-b border-white/5 text-right">Total Kas</th>
+                            <th className="p-4 text-[9px] font-black text-text-dim uppercase tracking-widest border-b border-white/5 text-center">Selisih</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/5">
+                          {branchHandover.length === 0 ? (
+                            <tr>
+                              <td colSpan={7} className="p-8 text-center text-text-dim text-[10px] font-bold uppercase italic tracking-widest">
+                                Belum ada riwayat serah terima untuk cabang ini.
+                              </td>
+                            </tr>
+                          ) : branchHandover.slice(0, 10).map(h => (
+                            <tr key={h.id} className="hover:bg-white/5 transition-colors group">
+                              <td className="p-4">
+                                <p className="text-[10px] font-bold text-white">{h.timestamp?.toDate().toLocaleDateString('id-ID')}</p>
+                                <p className="text-[8px] text-text-dim font-mono">{h.timestamp?.toDate().toLocaleTimeString('id-ID')}</p>
+                              </td>
+                              <td className="p-4 text-center">
+                                <span className={`text-[7px] px-2 py-1 rounded-full font-black uppercase tracking-tighter shadow-sm ${h.shift === 'siang' ? 'bg-yellow-500/20 text-yellow-500 border border-yellow-500/20' : 'bg-purple-500/20 text-purple-500 border border-purple-500/20'}`}>
+                                  {h.shift}
+                                </span>
+                              </td>
+                              <td className="p-4">
+                                <p className="text-[10px] font-black text-white uppercase tracking-tight">{h.employeeName}</p>
+                              </td>
+                              <td className="p-4 text-right">
+                                <p className="text-[10px] font-mono font-bold text-white">{formatRupiah(h.totalVoucher)}</p>
+                              </td>
+                              <td className="p-4 text-right">
+                                <p className="text-[10px] font-mono font-bold text-accent-blue">{formatRupiah(h.totalAksesoris)}</p>
+                              </td>
+                              <td className="p-4 text-right">
+                                <p className="text-xs font-black text-white">{formatRupiah(h.cashReported)}</p>
+                              </td>
+                              <td className="p-4 text-center">
+                                <span className={`text-[9px] font-black ${h.diff < 0 ? 'text-red-500' : h.diff > 0 ? 'text-green-500' : 'text-accent-blue'}`}>
+                                  {h.diff === 0 ? '-' : (h.diff > 0 ? '+' : '') + formatRupiah(h.diff)}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {branchHandover.length > 10 && (
+                        <div className="p-3 text-center border-t border-white/5">
+                           <p className="text-[8px] text-text-dim font-bold uppercase tracking-widest">Menampilkan 10 sesi terakhir. Gunakan export untuk data lengkap.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
       case 'history':
         const filteredTransactions = transactions.filter(t => 
           userData?.role === 'admin' || userData?.role === 'audit' || t.branchId === userData?.branchId
@@ -2344,17 +2677,37 @@ export default function App() {
                       <p className="text-[8px] text-text-dim">{tx.timestamp?.toDate().toLocaleString('id-ID')}</p>
                     </div>
                     <div className="text-right">
-                       <p className="text-sm font-black text-white">{formatRupiah(tx.totalAmount)}</p>
+                       <p className={`text-sm font-black ${tx.status === 'returned' ? 'text-red-500 line-through' : 'text-white'}`}>{formatRupiah(tx.totalAmount)}</p>
                        <p className="text-[8px] text-text-dim uppercase tracking-widest">{tx.employeeName}</p>
                     </div>
                   </div>
-                  <div className="space-y-1 border-t border-white/5 pt-2">
+                  <div className="space-y-1 border-y border-white/5 py-2">
                     {tx.items.map((it: any, i: number) => (
                       <div key={i} className="flex justify-between text-[10px]">
                         <span className="text-text-dim"><span className="text-accent-blue">[{it.provider}]</span> {it.name} - {it.variantName}</span>
                         <span className="font-mono text-[8px] opacity-50">{it.sn}</span>
                       </div>
                     ))}
+                  </div>
+
+                  <div className="flex justify-between items-center pt-1">
+                     {tx.status === 'returned' ? (
+                        <div className="flex items-center gap-1.5 text-red-500">
+                           <RotateCcw size={10} />
+                           <span className="text-[8px] font-black uppercase tracking-widest">Barang Telah Diretur</span>
+                        </div>
+                     ) : (
+                        <button 
+                           onClick={() => handleReturnTransaction(tx)}
+                           className="flex items-center gap-1.5 text-text-dim hover:text-red-500 transition-colors"
+                        >
+                           <RotateCcw size={10} />
+                           <span className="text-[8px] font-black uppercase tracking-widest">Retur Barang</span>
+                        </button>
+                     )}
+                     {tx.status === 'returned' && tx.returnedByName && (
+                        <span className="text-[7px] text-text-dim italic">Oleh: {tx.returnedByName}</span>
+                     )}
                   </div>
                 </div>
               )) : (
@@ -2419,6 +2772,8 @@ export default function App() {
     // Everyone sees dashboard except maybe pure POS users? User said Bos kusus dasbor.
     if (userData.role === 'admin' || userData.role === 'audit') {
       items.push({ id: 'dashboard', label: 'Home', icon: LayoutDashboard });
+      items.push({ id: 'restock', label: 'Restok', icon: AlertTriangle });
+      items.push({ id: 'reports', label: 'Laporan', icon: FileSpreadsheet });
     }
 
     if (userData.role === 'employee') {
@@ -2772,6 +3127,114 @@ export default function App() {
               >
                 Kembali ke Kasir
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showHandoverModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setShowHandoverModal(false)}></div>
+          <div className="relative glass-card w-full max-w-sm p-6 space-y-6 border border-white/20 animate-in zoom-in duration-300 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-2">
+               <h3 className="text-sm font-black text-white uppercase tracking-widest">Serah Terima Shift</h3>
+               <button onClick={() => setShowHandoverModal(false)} className="text-text-dim hover:text-white"><X size={20}/></button>
+            </div>
+
+            <div className="space-y-4">
+               {/* SHIFT TYPE SELECTOR */}
+               <div className="grid grid-cols-2 gap-3">
+                  <button 
+                    onClick={() => setHandoverConfig({...handoverConfig, shift: 'siang'})}
+                    className={`p-3 rounded-2xl border flex flex-col items-center gap-1 transition-all ${handoverConfig.shift === 'siang' ? 'bg-yellow-500/20 border-yellow-500/50 text-yellow-500' : 'bg-white/5 border-white/10 text-text-dim'}`}
+                  >
+                     <Sun size={18} />
+                     <span className="text-[9px] font-black uppercase">Siang</span>
+                  </button>
+                  <button 
+                    onClick={() => setHandoverConfig({...handoverConfig, shift: 'malam'})}
+                    className={`p-3 rounded-2xl border flex flex-col items-center gap-1 transition-all ${handoverConfig.shift === 'malam' ? 'bg-purple-500/20 border-purple-500/50 text-purple-500' : 'bg-white/5 border-white/10 text-text-dim'}`}
+                  >
+                     <Moon size={18} />
+                     <span className="text-[9px] font-black uppercase">Malam</span>
+                  </button>
+               </div>
+
+               {/* STATS OVERVIEW */}
+               <div className="bg-black/40 p-4 rounded-2xl border border-white/5 space-y-3">
+                  <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest text-center border-b border-white/10 pb-2">Status Penjualan Anda</p>
+                  <div className="flex justify-between items-center">
+                     <span className="text-[10px] text-text-dim uppercase font-bold">Voucher/Perdana</span>
+                     <span className="text-[11px] font-black text-white">
+                        {formatRupiah(transactions.filter(t => t.employeeId === user?.uid && t.status !== 'returned' && t.timestamp?.toDate() > new Date(Date.now() - 12 * 60 * 60 * 1000)).reduce((acc, tx) => acc + tx.items.filter((i:any) => i.category !== 'aksesoris').reduce((s:number, item:any)=>s+item.price, 0),0))}
+                     </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                     <span className="text-[10px] text-text-dim uppercase font-bold">Aksesoris</span>
+                     <span className="text-[11px] font-black text-accent-blue">
+                        {formatRupiah(transactions.filter(t => t.employeeId === user?.uid && t.status !== 'returned' && t.timestamp?.toDate() > new Date(Date.now() - 12 * 60 * 60 * 1000)).reduce((acc, tx) => acc + tx.items.filter((i:any) => i.category === 'aksesoris').reduce((s:number, item:any)=>s+item.price, 0),0))}
+                     </span>
+                  </div>
+                  <div className="pt-2 border-t border-white/10 flex justify-between items-center">
+                     <span className="text-[10px] font-black text-white uppercase">Total Tunai</span>
+                     <span className="text-xs font-black text-green-500">
+                        {formatRupiah(transactions.filter(t => t.employeeId === user?.uid && t.status !== 'returned' && t.timestamp?.toDate() > new Date(Date.now() - 12 * 60 * 60 * 1000)).reduce((acc, tx) => acc + tx.totalAmount, 0))}
+                     </span>
+                  </div>
+               </div>
+
+               <div className="space-y-3">
+                  <div className="space-y-1">
+                     <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Uang Fisik di Laci</p>
+                     <input 
+                       type="number" inputMode="numeric" placeholder="0"
+                       className="w-full bg-black/40 border border-glass-border p-3 rounded-xl text-xs font-mono text-white focus:outline-none focus:border-accent-blue/50"
+                       value={handoverConfig.cash}
+                       onChange={e => setHandoverConfig({...handoverConfig, cash: parseInt(e.target.value) || 0})}
+                     />
+                  </div>
+                  <div className="space-y-1">
+                     <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Catatan Tambahan</p>
+                     <textarea 
+                       placeholder="Misal: Kurang 1000 perak dsb..."
+                       className="w-full bg-black/40 border border-glass-border p-3 rounded-xl text-xs text-white h-20 focus:outline-none focus:border-accent-blue/50"
+                       value={handoverConfig.notes}
+                       onChange={e => setHandoverConfig({...handoverConfig, notes: e.target.value})}
+                     />
+                  </div>
+               </div>
+
+               <button 
+                 onClick={async () => {
+                    try {
+                       const sessionTx = transactions.filter(t => t.employeeId === user?.uid && t.status !== 'returned' && t.timestamp?.toDate() > new Date(Date.now() - 12 * 60 * 60 * 1000));
+                       const totalVoucher = sessionTx.reduce((acc, tx) => acc + tx.items.filter((i:any) => i.category !== 'aksesoris').reduce((s:number, item:any)=>s+item.price, 0),0);
+                       const totalAksesoris = sessionTx.reduce((acc, tx) => acc + tx.items.filter((i:any) => i.category === 'aksesoris').reduce((s:number, item:any)=>s+item.price, 0),0);
+                       
+                       await addDoc(collection(db, 'handovers'), {
+                          branchId: selectedBranch,
+                          employeeId: user?.uid,
+                          employeeName: userData?.name,
+                          shift: handoverConfig.shift,
+                          totalVoucher,
+                          totalAksesoris,
+                          totalCalculated: totalVoucher + totalAksesoris,
+                          cashReported: handoverConfig.cash,
+                          diff: handoverConfig.cash - (totalVoucher + totalAksesoris),
+                          notes: handoverConfig.notes,
+                          timestamp: serverTimestamp()
+                       });
+                       setShowHandoverModal(false);
+                       setHandoverConfig({ cash: 0, notes: '', shift: 'siang' });
+                       setPosStatus({ message: 'Serah terima shift berhasil disimpan!', type: 'success' });
+                    } catch (error) {
+                       handleFirestoreError(error, OperationType.WRITE, 'handovers');
+                    }
+                 }}
+                 className="w-full py-4 bg-accent-blue text-white rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-lg shadow-accent-blue/20 active:scale-95 transition"
+               >
+                  Simpan & Selesai Shift
+               </button>
             </div>
           </div>
         </div>
