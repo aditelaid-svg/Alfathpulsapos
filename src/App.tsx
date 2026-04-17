@@ -880,7 +880,7 @@ export default function App() {
               </div>
 
               {/* SECTION: FINANCIAL REPORT */}
-              <div className="glass-card p-6 border-white/10 bg-gradient-to-br from-white/[0.03] to-transparent space-y-6">
+              <div className="glass-card p-4 border-white/10 bg-gradient-to-br from-white/[0.03] to-transparent space-y-4">
                 <div className="flex items-center justify-between">
                    <div className="flex items-center gap-2">
                       <div className="w-8 h-8 rounded-lg bg-green-500/20 text-green-500 flex items-center justify-center">
@@ -894,18 +894,18 @@ export default function App() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-1">
                     <p className="text-[10px] font-bold text-text-dim uppercase tracking-[0.2em]">Omset Seluruh Cabang</p>
-                    <p className="text-3xl font-black text-white tracking-tighter">{formatRupiah(totalDaily)}</p>
+                    <p className="text-2xl font-black text-white tracking-tighter">{formatRupiah(totalDaily)}</p>
                     <div className="flex items-center gap-2 mt-2">
                        <span className="text-[9px] font-black bg-blue-500 text-white px-2 py-0.5 rounded uppercase tracking-tighter">{dailyTx.length} Transaksi Terjadi</span>
                     </div>
                   </div>
                   
-                  <div className="space-y-1 bg-green-500/5 p-4 rounded-2xl border border-green-500/10">
+                  <div className="space-y-1 bg-green-500/5 p-3 rounded-2xl border border-green-500/10">
                     <div className="flex items-center gap-2 mb-1">
                       <Wallet size={12} className="text-green-500" />
                       <p className="text-[10px] font-bold text-green-500 uppercase tracking-[0.2em]">Estimasi Laba Global</p>
                     </div>
-                    <p className="text-2xl font-black text-green-400 tracking-tighter">{formatRupiah(profitDaily)}</p>
+                    <p className="text-xl font-black text-green-400 tracking-tighter">{formatRupiah(profitDaily)}</p>
                     <p className="text-[8px] text-green-500/60 font-medium italic mt-1">*Margin kotor dari akumulasi penjualan</p>
                   </div>
                 </div>
@@ -941,11 +941,11 @@ export default function App() {
                  </div>
 
                  <div className="grid grid-cols-2 gap-3">
-                    <div className="glass-card p-4 border-white/5 bg-white/[0.02]">
+                    <div className="glass-card p-3 border-white/5 bg-white/[0.02]">
                        <p className="text-[8px] font-bold text-text-dim uppercase tracking-widest mb-1">Omset Cabang</p>
                        <p className="text-lg font-black text-white">{formatRupiah(branchTotalDaily)}</p>
                     </div>
-                    <div className="glass-card p-4 border-white/5 bg-white/[0.02]">
+                    <div className="glass-card p-3 border-white/5 bg-white/[0.02]">
                        <p className="text-[8px] font-bold text-text-dim uppercase tracking-widest mb-1">Laba Cabang</p>
                        <p className="text-lg font-black text-green-500">{formatRupiah(branchProfitDaily)}</p>
                     </div>
@@ -955,7 +955,7 @@ export default function App() {
               {/* SECTION: INVENTORY STATUS & ALERTS */}
               <div className="grid grid-cols-1 gap-4">
                  {lowStockAlerts.length > 0 && (
-                   <div className="glass-card p-6 border-red-500/30 bg-red-500/5 space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                   <div className="glass-card p-4 border-red-500/30 bg-red-500/5 space-y-3 animate-in fade-in slide-in-from-bottom-4 duration-500">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <ShieldAlert size={18} className="text-red-500 animate-pulse" />
@@ -973,8 +973,8 @@ export default function App() {
                               </div>
                               <div className="text-right pl-4">
                                  <div className="flex items-center justify-end gap-1">
-                                    <p className={`text-sm font-black ${item.stock === 0 ? 'text-red-500' : 'text-yellow-500'}`}>{item.stock}</p>
-                                    <Package size={12} className="text-text-dim" />
+                                    <p className={`text-xs font-black ${item.stock === 0 ? 'text-red-500' : 'text-yellow-500'}`}>{item.stock}</p>
+                                    <Package size={10} className="text-text-dim" />
                                  </div>
                                  <p className="text-[7px] text-text-dim uppercase font-bold tracking-tighter">Min Limit: {item.minStock || 5}</p>
                               </div>
@@ -998,7 +998,7 @@ export default function App() {
                     </div>
                     
                     <div className="grid grid-cols-2 gap-3">
-                       <div className="glass-card p-5 border-white/10 hover:border-accent-blue/30 transition-colors cursor-pointer group">
+                       <div className="glass-card p-4 border-white/10 hover:border-accent-blue/30 transition-colors cursor-pointer group">
                           <div className="flex justify-between items-start mb-2">
                              <div className="w-8 h-8 rounded-lg bg-accent-blue/10 flex items-center justify-center text-accent-blue group-hover:scale-110 transition-transform">
                                 <Package size={18} />
@@ -1006,12 +1006,12 @@ export default function App() {
                              <PieChart size={14} className="text-text-dim" />
                           </div>
                           <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest mb-1">Total Unit Stok</p>
-                          <p className="text-2xl font-black tracking-tighter text-white">
+                          <p className="text-xl font-black tracking-tighter text-white">
                              {Object.values(branchInventory).reduce((acc: number, curr: any) => acc + (curr.stock || 0), 0)}
                           </p>
                        </div>
 
-                       <div className="glass-card p-5 border-white/10 hover:border-accent-blue/30 transition-colors cursor-pointer group">
+                       <div className="glass-card p-4 border-white/10 hover:border-accent-blue/30 transition-colors cursor-pointer group">
                           <div className="flex justify-between items-start mb-2">
                              <div className="w-8 h-8 rounded-lg bg-yellow-500/10 flex items-center justify-center text-yellow-500 group-hover:scale-110 transition-transform">
                                 <ShoppingCart size={18} />
@@ -1019,13 +1019,13 @@ export default function App() {
                              <Activity size={14} className="text-text-dim" />
                           </div>
                           <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest mb-1">Total SKU Unik</p>
-                          <p className="text-2xl font-black tracking-tighter text-white">
+                          <p className="text-xl font-black tracking-tighter text-white">
                              {Object.keys(branchInventory).length}
                           </p>
                        </div>
                     </div>
 
-                    <div className="glass-card p-5 border-white/10 flex items-center justify-between bg-white/[0.02]">
+                    <div className="glass-card p-4 border-white/10 flex items-center justify-between bg-white/[0.02]">
                        <div className="flex items-center gap-4">
                           <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500">
                              <Store size={20} />
@@ -1063,17 +1063,17 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-                <div className="glass-card p-4 bg-accent-blue/5 border-accent-blue/20">
+                <div className="glass-card p-3 bg-accent-blue/5 border-accent-blue/20">
                   <p className="text-[8px] font-bold text-accent-blue/60 uppercase tracking-widest mb-1">Stok Ready</p>
                   <p className="text-xl font-black tracking-tighter">{totalBranchStock} <span className="text-[10px] font-bold opacity-50 uppercase">Pcs</span></p>
                 </div>
-                <div className="glass-card p-4 border-white/10">
+                <div className="glass-card p-3 border-white/10">
                   <p className="text-[8px] font-bold text-text-dim uppercase tracking-widest mb-1">Sales Hari Ini</p>
                   <p className="text-xl font-black tracking-tighter">{branchDailySales} <span className="text-[10px] font-bold opacity-50 uppercase">Item</span></p>
                 </div>
             </div>
 
-            <section className="bg-accent-blue/10 border border-accent-blue/20 p-5 rounded-3xl relative overflow-hidden group">
+            <section className="bg-accent-blue/10 border border-accent-blue/20 p-4 rounded-3xl relative overflow-hidden group">
                <Sparkles className="absolute -top-4 -right-4 text-accent-blue/20 group-hover:scale-110 transition-transform" size={120} />
                <h3 className="text-[9px] font-bold text-accent-blue uppercase tracking-widest relative z-10 mb-2">Pencapaian Omset</h3>
                <p className="text-2xl font-black tracking-tight text-white relative z-10">{formatRupiah(branchDailyRevenue)}</p>
@@ -1110,7 +1110,7 @@ export default function App() {
 
               <div className="grid grid-cols-1 gap-3">
                 {branches.map(b => (
-                  <div key={b.id} className="glass-card p-4 flex items-center gap-4 hover:border-white/20 transition-colors">
+                  <div key={b.id} className="glass-card p-3 flex items-center gap-4 hover:border-white/20 transition-colors">
                     <div className="w-10 h-10 bg-accent-blue/10 rounded-xl flex items-center justify-center text-accent-blue">
                       <MapPin size={20} />
                     </div>
@@ -1213,7 +1213,7 @@ export default function App() {
                 <div className="space-y-3 mt-6">
                   <h3 className="text-[10px] font-bold text-text-dim uppercase tracking-widest px-1">Daftar Pegawai Aktif</h3>
                   {allUsers.filter(u => u.isApproved && u.role !== 'admin').map(u => (
-                    <div key={u.id} className="glass-card p-3 flex items-center justify-between border-white/5">
+                    <div key={u.id} className="glass-card p-2 flex items-center justify-between border-white/5">
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-[8px] font-bold border border-white/10 uppercase">
                           {u.name[0]}
@@ -1621,7 +1621,7 @@ export default function App() {
                             <button 
                               key={`${p}-${pIdx}`} 
                               onClick={() => setViewState({ ...viewState, provider: p })}
-                              className={`glass-card p-5 flex justify-between items-center group active:scale-[0.98] transition border ${colors.split(' ').slice(2).join(' ')}`}
+                              className={`glass-card p-4 flex justify-between items-center group active:scale-[0.98] transition border ${colors.split(' ').slice(2).join(' ')}`}
                             >
                         <div className="flex items-center gap-4">
                           <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${colors.split(' ').slice(0, 2).join(' ')} group-hover:bg-white/20`}>
@@ -1732,8 +1732,8 @@ export default function App() {
             {viewState.product && viewState.variant && (
               <div className="fixed inset-0 z-[60] flex items-end">
                 <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setViewState({ ...viewState, product: null, variant: null })}></div>
-                <div className="relative w-full glass-card rounded-t-[40px] p-8 border-t border-white/10 animate-in slide-in-from-bottom duration-500 max-h-[85vh] overflow-y-auto">
-                  <div className="w-12 h-1 bg-white/20 rounded-full mx-auto mb-8"></div>
+                <div className="relative w-full glass-card rounded-t-[40px] p-6 border-t border-white/10 animate-in slide-in-from-bottom duration-500 max-h-[85vh] overflow-y-auto">
+                  <div className="w-12 h-1 bg-white/20 rounded-full mx-auto mb-6"></div>
                   
                   <div className="space-y-6">
                     <div className="flex justify-between items-start">
@@ -2215,7 +2215,7 @@ export default function App() {
                 </div>
             </div>
 
-            <div className="glass-card p-6 space-y-4 border-accent-blue/30 relative overflow-hidden">
+            <div className="glass-card p-4 space-y-4 border-accent-blue/30 relative overflow-hidden">
                <div className="absolute top-0 right-0 p-2 opacity-10">
                   <QrCode size={80} />
                </div>
@@ -2225,14 +2225,14 @@ export default function App() {
                    <input 
                     autoFocus
                     placeholder="Klik di sini & SCAN SN..."
-                    className="flex-1 bg-black/40 border-2 border-accent-blue/50 p-4 rounded-2xl text-lg font-mono placeholder:opacity-30 focus:outline-none focus:border-accent-blue shadow-inner"
+                    className="flex-1 bg-black/40 border-2 border-accent-blue/50 p-3 rounded-2xl text-base font-mono placeholder:opacity-30 focus:outline-none focus:border-accent-blue shadow-inner"
                     value={posScannerInput}
                     onChange={e => setPosScannerInput(e.target.value)}
                     onKeyDown={handlePOSScan}
                    />
                    <button 
                     onClick={() => setShowCameraScanner('pos')}
-                    className="aspect-square w-16 bg-accent-blue/20 text-accent-blue rounded-2xl flex items-center justify-center border-2 border-accent-blue/30 shadow-lg shadow-accent-blue/10"
+                    className="aspect-square w-14 bg-accent-blue/20 text-accent-blue rounded-2xl flex items-center justify-center border-2 border-accent-blue/30 shadow-lg shadow-accent-blue/10"
                    >
                      <Camera size={32} />
                    </button>
@@ -2281,7 +2281,7 @@ export default function App() {
 
             {cart.length > 0 && (
               <div className="fixed bottom-20 left-4 right-4 md:static md:bottom-auto md:left-auto md:right-auto md:mt-6 animate-in slide-in-from-bottom-10">
-                <div className="glass-card p-4 border-accent-blue/50 shadow-2xl shadow-accent-blue/20 space-y-3 bg-gray-900/90 md:bg-gray-900/40 backdrop-blur-3xl">
+                <div className="glass-card p-3 border-accent-blue/50 shadow-2xl shadow-accent-blue/20 space-y-3 bg-gray-900/90 md:bg-gray-900/40 backdrop-blur-3xl">
                   <div className="flex justify-between items-center px-1">
                     <p className="text-[10px] font-bold text-text-dim uppercase tracking-[0.2em]">Total Transaksi</p>
                     <p className="text-xl font-black text-accent-blue">{formatRupiah(totalCart)}</p>
@@ -2562,7 +2562,7 @@ export default function App() {
       {showTransferModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
           <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setShowTransferModal(false)}></div>
-          <div className="relative glass-card w-full max-w-lg p-6 space-y-6 border border-white/20 animate-in zoom-in duration-300">
+          <div className="relative glass-card w-full max-w-lg p-4 space-y-6 border border-white/20 animate-in zoom-in duration-300">
              <div className="flex justify-between items-center">
                 <h3 className="text-lg font-black uppercase tracking-widest text-accent-blue flex items-center gap-2">
                    <ArrowLeftRight size={20} /> Transfer Unit Antar Cabang
@@ -2645,7 +2645,7 @@ export default function App() {
       {showDisposalModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
           <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setShowDisposalModal(false)}></div>
-          <div className="relative glass-card w-full max-w-sm p-8 space-y-6 border border-white/20 animate-in zoom-in duration-300">
+          <div className="relative glass-card w-full max-w-sm p-6 space-y-6 border border-white/20 animate-in zoom-in duration-300">
              <div className="space-y-4 text-center">
                 <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto text-red-500">
                    <RotateCcw size={32} />
@@ -2691,15 +2691,15 @@ export default function App() {
         <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/90 backdrop-blur-xl" onClick={() => setShowReceiptModal(false)}></div>
           <div className="relative glass-card w-full max-w-sm overflow-hidden border-accent-blue/40 animate-in slide-in-from-bottom-8 duration-500">
-            <div className="bg-accent-blue p-6 text-center text-gray-950">
-               <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-3 shadow-inner">
-                  <UserCheck size={24} />
+            <div className="bg-accent-blue p-4 text-center text-gray-950">
+               <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-2 shadow-inner">
+                  <UserCheck size={20} />
                </div>
-               <h3 className="text-lg font-black uppercase tracking-widest">Penjualan Berhasil</h3>
-               <p className="text-[10px] font-bold opacity-80 uppercase mt-1 tracking-tighter">ID: {lastTransaction.id.substring(0, 8)}</p>
+               <h3 className="text-base font-black uppercase tracking-widest">Penjualan Berhasil</h3>
+               <p className="text-[9px] font-bold opacity-80 uppercase mt-1 tracking-tighter">ID: {lastTransaction.id.substring(0, 8)}</p>
             </div>
             
-            <div className="p-6 space-y-6">
+            <div className="p-4 space-y-6">
               <div className="border-b border-white/5 pb-4 space-y-4">
                 {lastTransaction.items.map((item: any, i: number) => (
                   <div key={i} className="flex justify-between items-start">
@@ -2752,7 +2752,7 @@ export default function App() {
       {confirmModal.show && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
           <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setConfirmModal(prev => ({ ...prev, show: false }))}></div>
-          <div className="relative glass-card w-full max-w-sm p-8 space-y-6 border border-white/20 animate-in zoom-in duration-300">
+          <div className="relative glass-card w-full max-w-sm p-6 space-y-6 border border-white/20 animate-in zoom-in duration-300">
             <div className="space-y-4 text-center">
               <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto text-red-500">
                 <ShieldAlert size={32} />
