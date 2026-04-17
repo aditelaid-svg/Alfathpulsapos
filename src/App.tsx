@@ -7,7 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { db, auth } from './firebase';
 import { collection, onSnapshot, addDoc, serverTimestamp, doc, setDoc, updateDoc, getDoc, deleteDoc } from 'firebase/firestore';
 import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
-import { LayoutDashboard, ShoppingCart, Package, Store, Settings, Plus, ChevronRight, Hash, QrCode, UserCheck, ShieldAlert, MapPin, Trash2, Camera, X, Sparkles, ArrowLeftRight, RotateCcw, FileText, History, LogOut } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, Store, Settings, Plus, ChevronRight, Hash, QrCode, UserCheck, ShieldAlert, MapPin, Trash2, Camera, X, Sparkles, ArrowLeftRight, RotateCcw, FileText, History, LogOut, TrendingUp, Wallet, PieChart, Activity, Coins } from 'lucide-react';
 import CameraScanner from './components/CameraScanner';
 
 enum OperationType {
@@ -93,7 +93,7 @@ export default function App() {
     provider: 'Telkomsel',
     category: 'voucher',
     targetProductId: '', // For adding to existing product (kept for backward schema compat but hidden from UI)
-    variant: { id: Math.random().toString(36).substr(2, 9), modalPrice: 0, sellingPrice: 0, description: '' },
+    variant: { id: Math.random().toString(36).substr(2, 9), modalPrice: 0, sellingPrice: 0, description: '', minStock: 5 },
     sn: '',
     qty: 1
   });
@@ -115,6 +115,8 @@ export default function App() {
   const [transferConfig, setTransferConfig] = useState({ toBranchId: '', productId: '', variantId: '', sns: [] as string[] });
   const [showDisposalModal, setShowDisposalModal] = useState(false);
   const [disposalConfig, setDisposalConfig] = useState({ productId: '', variantId: '', sns: [] as string[], reason: 'broken' });
+  const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [lastTransaction, setLastTransaction] = useState<any>(null);
 
   const providersList = ['Telkomsel', 'Indosat', 'XL', 'Axis', 'Three', 'Smartfren', 'Lainnya'];
   const brandsList = ['Robot', 'Vivan', 'Baseus', 'Oppo', 'Samsung', 'Vivo', 'Xiaomi', 'Rexi', 'Foomee', 'Lainnya'];
@@ -540,7 +542,7 @@ export default function App() {
         provider: 'Telkomsel',
         category: 'voucher',
         targetProductId: '',
-        variant: { id: Math.random().toString(36).substr(2, 9), modalPrice: 0, sellingPrice: 0, description: '' },
+        variant: { id: Math.random().toString(36).substr(2, 9), modalPrice: 0, sellingPrice: 0, description: '', minStock: 5 },
         sn: '',
         qty: 1
       });
@@ -817,25 +819,59 @@ export default function App() {
         const dailyTx = transactions.filter(t => {
           const txDate = t.timestamp?.toDate().toDateString();
           const today = new Date().toDateString();
-          return txDate === today && (userData?.role === 'admin' || t.branchId === selectedBranch);
+          const isToday = txDate === today;
+          if (!isToday) return false;
+          
+          // If admin, show all today's transactions for global report
+          // If employee, only their branch
+          return userData?.role === 'admin' || t.branchId === selectedBranch;
         });
-        const totalDaily = dailyTx.reduce((acc, curr) => acc + curr.totalAmount, 0);
+        
+        // Specifically for the branch summary, we might want branch-specific daily totals too
+        const branchDailyTx = transactions.filter(t => {
+          const txDate = t.timestamp?.toDate().toDateString();
+          const today = new Date().toDateString();
+          return txDate === today && t.branchId === selectedBranch;
+        });
+        const branchTotalDaily = branchDailyTx.reduce((acc, curr) => acc + curr.totalAmount, 0);
+        const branchProfitDaily = branchDailyTx.reduce((acc, curr) => acc + (curr.totalProfit || 0), 0);
 
-        const lowStockItems = [];
-        if (userData?.role === 'admin') {
-          for (const b of branches) {
-            // This is a bit heavy, in production we'd do a server-side query or optimized state
-            // For now, let's just use the current branch inventory if it's there
-          }
-        }
+        const totalDaily = dailyTx.reduce((acc, curr) => acc + curr.totalAmount, 0);
+        const profitDaily = dailyTx.reduce((acc, curr) => acc + (curr.totalProfit || 0), 0);
+
+        const allInventory = Object.entries(branchInventory).map(([key, value]: [string, any]) => ({
+          key,
+          ...value
+        }));
+
+        const lowStockAlerts = allInventory.filter(inv => {
+          const product = products.find(p => p.id === inv.productId);
+          if (!product) return false;
+          const variant = product.variants?.find((v: any) => v.id === inv.variantId);
+          if (!variant) return false;
+          return inv.stock <= (variant.minStock || 0);
+        }).map(inv => {
+          const product = products.find(p => p.id === inv.productId);
+          const variant = product?.variants?.find((v: any) => v.id === inv.variantId);
+          return {
+            ...inv,
+            productName: product?.name,
+            variantName: variant?.name || variant?.description,
+            minStock: variant?.minStock
+          };
+        });
 
         if (userData?.role === 'admin') {
           return (
-            <div className="space-y-4 pb-10">
-              <div className="flex justify-between items-center mb-1 px-1">
-                 <h2 className="text-lg font-black text-white tracking-widest uppercase">Pusat Kendali</h2>
+            <div className="space-y-6 pb-10">
+              {/* TOP HEADER & BRANCH SELECTOR */}
+              <div className="flex justify-between items-center px-1">
+                 <div>
+                    <h2 className="text-xl font-black text-white tracking-widest uppercase">Admin Panel</h2>
+                    <p className="text-[10px] text-text-dim uppercase font-bold tracking-widest">Dashboard Kendali Sistem</p>
+                 </div>
                  <select 
-                    className="bg-gray-800 text-[10px] border border-glass-border px-3 py-1.5 rounded-xl focus:outline-none"
+                    className="bg-gray-800 text-[10px] border border-glass-border px-3 py-2 rounded-xl focus:outline-none focus:border-accent-blue/50 text-white font-bold"
                     value={selectedBranch || ''}
                     onChange={e => setSelectedBranch(e.target.value)}
                   >
@@ -843,56 +879,171 @@ export default function App() {
                   </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                 <div className="glass-card p-4 border-accent-blue/20 bg-accent-blue/5">
-                    <p className="text-[8px] font-bold text-accent-blue/60 uppercase tracking-widest mb-1">Total Katalog</p>
-                    <p className="text-xl font-black tracking-tighter">{products.length}</p>
+              {/* SECTION: FINANCIAL REPORT */}
+              <div className="glass-card p-6 border-white/10 bg-gradient-to-br from-white/[0.03] to-transparent space-y-6">
+                <div className="flex items-center justify-between">
+                   <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg bg-green-500/20 text-green-500 flex items-center justify-center">
+                         <TrendingUp size={18} />
+                      </div>
+                      <h3 className="text-xs font-black text-white uppercase tracking-widest">Laporan Keuangan Global</h3>
+                   </div>
+                   <span className="text-[8px] font-bold text-green-500 bg-green-500/10 px-2 py-1 rounded-full uppercase tracking-tighter animate-pulse">Hari Ini</span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-bold text-text-dim uppercase tracking-[0.2em]">Omset Seluruh Cabang</p>
+                    <p className="text-3xl font-black text-white tracking-tighter">{formatRupiah(totalDaily)}</p>
+                    <div className="flex items-center gap-2 mt-2">
+                       <span className="text-[9px] font-black bg-blue-500 text-white px-2 py-0.5 rounded uppercase tracking-tighter">{dailyTx.length} Transaksi Terjadi</span>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-1 bg-green-500/5 p-4 rounded-2xl border border-green-500/10">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Wallet size={12} className="text-green-500" />
+                      <p className="text-[10px] font-bold text-green-500 uppercase tracking-[0.2em]">Estimasi Laba Global</p>
+                    </div>
+                    <p className="text-2xl font-black text-green-400 tracking-tighter">{formatRupiah(profitDaily)}</p>
+                    <p className="text-[8px] text-green-500/60 font-medium italic mt-1">*Margin kotor dari akumulasi penjualan</p>
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-white/5 grid grid-cols-2 gap-4">
+                   <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                         <span className="text-[9px] font-bold text-text-dim uppercase tracking-widest">Aktivitas Global</span>
+                      </div>
+                      <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
+                         <div className="bg-blue-500 h-full" style={{ width: `${Math.min(100, (dailyTx.length / 100) * 100)}%` }}></div>
+                      </div>
+                   </div>
+                   <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                         <span className="text-[9px] font-bold text-text-dim uppercase tracking-widest">Laba vs Omset</span>
+                      </div>
+                      <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
+                         <div className="bg-green-500 h-full" style={{ width: `${totalDaily > 0 ? (profitDaily / totalDaily) * 100 : 0}%` }}></div>
+                      </div>
+                   </div>
+                </div>
+              </div>
+
+              {/* BRANCH SPECIFIC DRILL-DOWN */}
+              <div className="space-y-3">
+                 <div className="flex justify-between items-center px-1">
+                    <h3 className="text-[10px] font-bold text-text-dim uppercase tracking-[0.2em]">Status Cabang: {branches.find(b => b.id === selectedBranch)?.name}</h3>
+                    <div className="flex items-center gap-1">
+                       <span className="w-1.5 h-1.5 rounded-full bg-accent-blue animate-pulse"></span>
+                       <span className="text-[8px] font-bold text-accent-blue uppercase tracking-widest">Live View</span>
+                    </div>
                  </div>
-                 <div className="glass-card p-4 border-white/10">
-                    <p className="text-[8px] font-bold text-text-dim uppercase tracking-widest mb-1">Cabang Aktif</p>
-                    <p className="text-xl font-black tracking-tighter">{branches.length}</p>
+
+                 <div className="grid grid-cols-2 gap-3">
+                    <div className="glass-card p-4 border-white/5 bg-white/[0.02]">
+                       <p className="text-[8px] font-bold text-text-dim uppercase tracking-widest mb-1">Omset Cabang</p>
+                       <p className="text-lg font-black text-white">{formatRupiah(branchTotalDaily)}</p>
+                    </div>
+                    <div className="glass-card p-4 border-white/5 bg-white/[0.02]">
+                       <p className="text-[8px] font-bold text-text-dim uppercase tracking-widest mb-1">Laba Cabang</p>
+                       <p className="text-lg font-black text-green-500">{formatRupiah(branchProfitDaily)}</p>
+                    </div>
                  </div>
               </div>
 
-              <section className="space-y-2">
-                 <h3 className="text-[9px] font-bold text-text-dim uppercase tracking-[0.2em] px-1">Omset Harian (Global)</h3>
-                 <div className="glass-card p-5 space-y-4 border-accent-blue/30 bg-gradient-to-br from-accent-blue/10 to-transparent">
-                    <div className="flex justify-between items-end">
-                      <div>
-                        <p className="text-2xl font-black text-white tracking-tight">{formatRupiah(totalDaily)}</p>
+              {/* SECTION: INVENTORY STATUS & ALERTS */}
+              <div className="grid grid-cols-1 gap-4">
+                 {lowStockAlerts.length > 0 && (
+                   <div className="glass-card p-6 border-red-500/30 bg-red-500/5 space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <ShieldAlert size={18} className="text-red-500 animate-pulse" />
+                          <h3 className="text-xs font-black text-red-500 uppercase tracking-widest">Peringatan Stok Menipis</h3>
+                        </div>
+                        <span className="px-2 py-0.5 bg-red-500 text-white text-[9px] font-black rounded-full uppercase tracking-tighter">{lowStockAlerts.length} SKU</span>
                       </div>
-                      <div className="text-right">
-                        <p className="text-[9px] font-bold text-accent-blue uppercase tracking-tighter">{dailyTx.length} Transaksi</p>
+                      
+                      <div className="space-y-3 max-h-[220px] overflow-y-auto pr-2 custom-scrollbar">
+                         {lowStockAlerts.map((item: any, idx) => (
+                           <div key={idx} className="flex justify-between items-center bg-black/40 p-3 rounded-xl border border-white/5 hover:border-red-500/30 transition-colors">
+                              <div className="flex-1">
+                                 <p className="text-[11px] font-black text-white uppercase tracking-tight line-clamp-1">{item.productName}</p>
+                                 <p className="text-[9px] text-accent-blue font-bold uppercase tracking-tighter">{item.variantName}</p>
+                              </div>
+                              <div className="text-right pl-4">
+                                 <div className="flex items-center justify-end gap-1">
+                                    <p className={`text-sm font-black ${item.stock === 0 ? 'text-red-500' : 'text-yellow-500'}`}>{item.stock}</p>
+                                    <Package size={12} className="text-text-dim" />
+                                 </div>
+                                 <p className="text-[7px] text-text-dim uppercase font-bold tracking-tighter">Min Limit: {item.minStock || 5}</p>
+                              </div>
+                           </div>
+                         ))}
                       </div>
-                    </div>
-                    <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
-                       <div className="bg-accent-blue h-full animate-pulse" style={{ width: '65%' }}></div>
-                    </div>
-                 </div>
-              </section>
+                      <button 
+                         onClick={() => setActiveMenu('products')}
+                         className="w-full py-3 bg-red-500/10 border border-red-500/20 text-red-500 text-[10px] font-black uppercase tracking-[0.2em] rounded-xl hover:bg-red-500 hover:text-white transition-all"
+                      >
+                         Restock Sekarang
+                      </button>
+                   </div>
+                 )}
 
-              <section className="space-y-3 mt-4">
-                 <div className="flex justify-between items-center px-1">
-                    <h3 className="text-[9px] font-bold text-text-dim uppercase tracking-[0.2em]">Ringkasan Stok Cabang</h3>
-                    <span className="text-[10px] font-bold text-accent-blue">{Object.values(branchInventory).reduce((acc: number, curr: any) => acc + (curr.stock || 0), 0)} Unit</span>
-                 </div>
-                 <div className="grid grid-cols-2 gap-2">
-                    <div className="glass-card p-3 border-white/5 flex items-center gap-3">
-                       <div className="w-8 h-8 rounded-lg bg-green-500/10 flex items-center justify-center text-green-500"><ShoppingCart size={14} /></div>
-                       <div>
-                          <p className="text-[7px] text-text-dim uppercase font-bold">Terjual</p>
-                          <p className="text-xs font-black">{transactions.length}</p>
+                 {/* BRANCH SUMMARY CARDS */}
+                 <div className="space-y-3">
+                    <div className="flex justify-between items-center px-1">
+                       <h3 className="text-[10px] font-bold text-text-dim uppercase tracking-[0.2em]">Logistik Cabang</h3>
+                       <Activity size={14} className="text-accent-blue" />
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-3">
+                       <div className="glass-card p-5 border-white/10 hover:border-accent-blue/30 transition-colors cursor-pointer group">
+                          <div className="flex justify-between items-start mb-2">
+                             <div className="w-8 h-8 rounded-lg bg-accent-blue/10 flex items-center justify-center text-accent-blue group-hover:scale-110 transition-transform">
+                                <Package size={18} />
+                             </div>
+                             <PieChart size={14} className="text-text-dim" />
+                          </div>
+                          <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest mb-1">Total Unit Stok</p>
+                          <p className="text-2xl font-black tracking-tighter text-white">
+                             {Object.values(branchInventory).reduce((acc: number, curr: any) => acc + (curr.stock || 0), 0)}
+                          </p>
+                       </div>
+
+                       <div className="glass-card p-5 border-white/10 hover:border-accent-blue/30 transition-colors cursor-pointer group">
+                          <div className="flex justify-between items-start mb-2">
+                             <div className="w-8 h-8 rounded-lg bg-yellow-500/10 flex items-center justify-center text-yellow-500 group-hover:scale-110 transition-transform">
+                                <ShoppingCart size={18} />
+                             </div>
+                             <Activity size={14} className="text-text-dim" />
+                          </div>
+                          <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest mb-1">Total SKU Unik</p>
+                          <p className="text-2xl font-black tracking-tighter text-white">
+                             {Object.keys(branchInventory).length}
+                          </p>
                        </div>
                     </div>
-                    <div className="glass-card p-3 border-white/5 flex items-center gap-3">
-                       <div className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center text-red-500"><RotateCcw size={14} /></div>
-                       <div>
-                          <p className="text-[7px] text-text-dim uppercase font-bold">Retur</p>
-                          <p className="text-xs font-black">{disposals.length}</p>
+
+                    <div className="glass-card p-5 border-white/10 flex items-center justify-between bg-white/[0.02]">
+                       <div className="flex items-center gap-4">
+                          <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500">
+                             <Store size={20} />
+                          </div>
+                          <div>
+                             <p className="text-[11px] font-black text-white uppercase tracking-tight">Status Operasional</p>
+                             <div className="flex items-center gap-2 mt-1">
+                                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                                <span className="text-[9px] text-green-500 font-bold uppercase tracking-widest">Sistem Online</span>
+                             </div>
+                          </div>
                        </div>
+                       <button onClick={() => setActiveMenu('system')} className="p-3 bg-white/5 rounded-xl border border-white/10 text-white hover:bg-white/10">
+                          < ChevronRight size={18} />
+                       </button>
                     </div>
                  </div>
-              </section>
+              </div>
             </div>
           );
         }
@@ -1104,7 +1255,7 @@ export default function App() {
               >
                 Keluar dari Sistem
               </button>
-              <p className="text-[8px] text-text-dim uppercase tracking-widest">Alpatpulsa System v1.0.3</p>
+              <p className="text-[8px] text-text-dim uppercase tracking-widest">Alpatpulsa System v1.0.4</p>
             </section>
           </div>
         );
@@ -1246,6 +1397,19 @@ export default function App() {
                             />
                             <p className="text-[9px] text-green-400 font-bold mt-1 px-1">{formatRupiah(newProduct.variant.sellingPrice || 0)}</p>
                           </div>
+                          <div className="space-y-1">
+                            <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Limit Stok (Alert)</p>
+                            <input 
+                              type="number" placeholder="5" 
+                              className="w-full bg-black/40 border border-glass-border p-3 rounded-xl text-xs text-red-400 font-bold focus:outline-none focus:border-red-500" 
+                              value={newProduct.variant.minStock}
+                              onChange={e => {
+                                const val = e.target.value === '' ? 0 : Number(e.target.value);
+                                if (!isNaN(val)) setNewProduct({...newProduct, variant: { ...newProduct.variant, minStock: val }});
+                              }} 
+                            />
+                            <p className="text-[8px] text-text-dim mt-1 px-1">Peringatan jika sisa stok sedikit</p>
+                          </div>
                         </div>
                       </div>
 
@@ -1379,6 +1543,19 @@ export default function App() {
                               }} 
                             />
                             <p className="text-[9px] text-green-400 font-bold mt-1 px-1">{formatRupiah(newProduct.variant.sellingPrice || 0)}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Limit Stok (Alert)</p>
+                            <input 
+                              type="number" placeholder="5" 
+                              className="w-full bg-black/40 border border-glass-border p-3 rounded-xl text-xs text-red-400 font-bold focus:outline-none focus:border-red-500" 
+                              value={newProduct.variant.minStock}
+                              onChange={e => {
+                                const val = e.target.value === '' ? 0 : Number(e.target.value);
+                                if (!isNaN(val)) setNewProduct({...newProduct, variant: { ...newProduct.variant, minStock: val }});
+                              }} 
+                            />
+                            <p className="text-[8px] text-text-dim mt-1 px-1">Peringatan jika sisa stok sedikit</p>
                           </div>
                         </div>
                       </div>
@@ -1942,6 +2119,7 @@ export default function App() {
                       name: product.name,
                       variantName: variant.name,
                       price: variant.sellingPrice,
+                      modal: variant.modalPrice || 0,
                       category: product.category,
                       provider: product.provider
                     }]);
@@ -1992,7 +2170,7 @@ export default function App() {
                 }
 
                 // Add to Global Transactions
-                await addDoc(collection(db, 'transactions'), {
+                const txData: any = {
                   branchId: selectedBranch,
                   branchName: branches.find(b => b.id === selectedBranch)?.name || 'Unknown',
                   employeeId: auth.currentUser?.uid,
@@ -2004,14 +2182,22 @@ export default function App() {
                     name: item.name,
                     variantName: item.variantName,
                     price: item.price,
+                    modal: item.modal || 0,
                     provider: item.provider
                   })),
                   totalAmount: totalCart,
+                  totalProfit: cart.reduce((acc, curr) => acc + (curr.price - (curr.modal || 0)), 0),
                   timestamp: serverTimestamp()
-                });
+                };
 
+                const docRef = await addDoc(collection(db, 'transactions'), txData);
+                
+                // Create receipt snapshot
+                setLastTransaction({ id: docRef.id, ...txData, timestamp: new Date() });
+                
                 setCart([]);
                 setPosStatus({ message: "Penjualan Berhasil Disimpan!", type: 'success' });
+                setShowReceiptModal(true);
                 setConfirmModal(prev => ({ ...prev, show: false }));
               } catch (error: any) {
                 handleFirestoreError(error, OperationType.WRITE, `branches/${selectedBranch}/inventory`);
@@ -2496,6 +2682,69 @@ export default function App() {
                   Batal
                 </button>
              </div>
+          </div>
+        </div>
+      )}
+
+      {/* RECEIPT MODAL */}
+      {showReceiptModal && lastTransaction && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/90 backdrop-blur-xl" onClick={() => setShowReceiptModal(false)}></div>
+          <div className="relative glass-card w-full max-w-sm overflow-hidden border-accent-blue/40 animate-in slide-in-from-bottom-8 duration-500">
+            <div className="bg-accent-blue p-6 text-center text-gray-950">
+               <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-3 shadow-inner">
+                  <UserCheck size={24} />
+               </div>
+               <h3 className="text-lg font-black uppercase tracking-widest">Penjualan Berhasil</h3>
+               <p className="text-[10px] font-bold opacity-80 uppercase mt-1 tracking-tighter">ID: {lastTransaction.id.substring(0, 8)}</p>
+            </div>
+            
+            <div className="p-6 space-y-6">
+              <div className="border-b border-white/5 pb-4 space-y-4">
+                {lastTransaction.items.map((item: any, i: number) => (
+                  <div key={i} className="flex justify-between items-start">
+                    <div>
+                      <p className="text-[11px] font-black uppercase text-white tracking-tight">{item.name}</p>
+                      <p className="text-[9px] text-accent-blue font-bold uppercase">{item.variantName}</p>
+                      <p className="text-[8px] text-text-dim font-mono">{item.sn}</p>
+                    </div>
+                    <p className="text-xs font-bold text-white">{formatRupiah(item.price)}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex justify-between items-center bg-white/5 p-4 rounded-xl border border-white/10">
+                <span className="text-[10px] font-bold text-text-dim uppercase tracking-widest">Total Bayar</span>
+                <span className="text-lg font-black text-accent-blue tracking-tighter">{formatRupiah(lastTransaction.totalAmount)}</span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                 <button 
+                  onClick={() => window.print()}
+                  className="p-4 glass-card border-white/20 flex flex-col items-center gap-2 hover:bg-white/5 transition active:scale-95"
+                 >
+                    <Plus size={16} className="text-accent-blue rotate-45" />
+                    <span className="text-[9px] font-bold uppercase tracking-widest">Cetak Struk</span>
+                 </button>
+                 <button 
+                  onClick={() => {
+                    const msg = `*ALPATPULSA RECEIPT*\n------------------\n${lastTransaction.items.map((i:any) => `${i.name}\n${i.sn}\n${formatRupiah(i.price)}`).join('\n--\n')}\n------------------\n*TOTAL: ${formatRupiah(lastTransaction.totalAmount)}*\nTerima Kasih!`;
+                    window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+                  }}
+                  className="p-4 bg-green-500 rounded-2xl flex flex-col items-center gap-2 shadow-lg shadow-green-500/20 active:scale-95 transition"
+                 >
+                    <ChevronRight size={16} className="text-white" />
+                    <span className="text-[9px] font-black text-white uppercase tracking-widest">Share WA</span>
+                 </button>
+              </div>
+
+              <button 
+                onClick={() => setShowReceiptModal(false)}
+                className="w-full py-4 text-[10px] font-bold uppercase tracking-widest text-text-dim border-t border-white/5 pt-6 mt-2"
+              >
+                Kembali ke Kasir
+              </button>
+            </div>
           </div>
         </div>
       )}
