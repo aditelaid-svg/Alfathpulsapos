@@ -12,7 +12,7 @@
 }
 
 body {
-  background: radial-gradient(circle at top left, #1a1a2e, #16213e, #0f3460);
+  background: #0a0a0b;
   color: var(--color-text-main);
   font-family: var(--font-sans);
   min-height: 100vh;

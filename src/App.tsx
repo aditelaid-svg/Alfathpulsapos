@@ -348,6 +348,89 @@ export default function App() {
     });
   };
 
+  const handleDeleteBranch = async (branchId: string) => {
+    setConfirmModal({
+      show: true,
+      title: "Hapus Cabang",
+      message: "Apakah Anda yakin ingin menghapus cabang ini? Semua data stok di cabang ini juga akan hilang secara permanen di sistem lokal.",
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'branches', branchId));
+          setConfirmModal(prev => ({ ...prev, show: false }));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, `branches/${branchId}`);
+        }
+      }
+    });
+  };
+
+  const handleDeleteUser = async (userId: string) => {
+    setConfirmModal({
+      show: true,
+      title: "Hapus Pegawai",
+      message: "Hapus akses pegawai ini secara permanen dari sistem Alpatpulsa?",
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'users', userId));
+          setConfirmModal(prev => ({ ...prev, show: false }));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, `users/${userId}`);
+        }
+      }
+    });
+  };
+
+  const handleDeleteSN = async (sn: string) => {
+    if (!selectedBranch || !viewState.product || !viewState.variant) return;
+    
+    setConfirmModal({
+      show: true,
+      title: "Hapus SN",
+      message: `Hapus Serial Number ${sn} secara permanen dari stok cabang ini?`,
+      onConfirm: async () => {
+        try {
+          const itemRef = doc(db, `branches/${selectedBranch}/inventory`, `${viewState.product.id}_${viewState.variant.id}`);
+          const currentData = branchInventory[`${viewState.product.id}_${viewState.variant.id}`];
+          if (!currentData) return;
+          
+          const newSns = currentData.sns.filter((s: string) => s !== sn);
+          await updateDoc(itemRef, {
+            sns: newSns,
+            stock: newSns.length,
+            lastUpdated: serverTimestamp()
+          });
+          setConfirmModal(prev => ({ ...prev, show: false }));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, `inventory/${sn}`);
+        }
+      }
+    });
+  };
+
+  const handleDeleteVariant = async (productId: string, variantId: string) => {
+    setConfirmModal({
+      show: true,
+      title: "Hapus Varian",
+      message: "Hapus paksa varian ini dari katalog? Stok terdaftar akan tetap ada di database tapi tidak akan muncul di menu.",
+      onConfirm: async () => {
+        try {
+          const productRef = doc(db, 'products', productId);
+          const pDoc = await getDoc(productRef);
+          if (pDoc.exists()) {
+            const data = pDoc.data();
+            const vId = variantId;
+            const newVariants = data.variants.filter((v: any) => (v.id || v.name) !== vId);
+            await updateDoc(productRef, { variants: newVariants });
+          }
+          setConfirmModal(prev => ({ ...prev, show: false }));
+          setViewState(prev => ({ ...prev, product: null, variant: null }));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, `variants/${variantId}`);
+        }
+      }
+    });
+  };
+
   const handleSaveProduct = async () => {
     const trimmedName = newProduct.name.trim();
     if (!trimmedName) {
@@ -884,11 +967,21 @@ export default function App() {
                       <h3 className="font-bold text-sm tracking-tight">{b.name}</h3>
                       <p className="text-[10px] text-text-dim leading-tight">{b.location}</p>
                     </div>
-                    {userData?.role === 'admin' && (
-                      <div className="text-[10px] bg-white/5 px-2 py-1 rounded-lg border border-white/10">
-                        {allUsers.filter(u => u.branchId === b.id).length} Pegawai
-                      </div>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {userData?.role === 'admin' && (
+                        <button 
+                          onClick={() => handleDeleteBranch(b.id)}
+                          className="p-2 text-red-500/60 hover:text-red-500 transition-colors"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                      {userData?.role === 'admin' && (
+                        <div className="text-[10px] bg-white/5 px-2 py-1 rounded-lg border border-white/10">
+                          {allUsers.filter(u => u.branchId === b.id).length} Pegawai
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -981,15 +1074,23 @@ export default function App() {
                           </p>
                         </div>
                       </div>
-                      <button 
-                        onClick={() => {
-                          const newBId = prompt("ID Cabang baru (atau biarkan kosong):");
-                          if (newBId !== null) updateDoc(doc(db, 'users', u.id), { branchId: newBId });
-                        }}
-                        className="p-2 text-text-dim hover:text-white"
-                      >
-                        <Settings size={14} />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button 
+                          onClick={() => handleDeleteUser(u.id)}
+                          className="p-2 text-red-500/60 hover:text-red-500"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                        <button 
+                          onClick={() => {
+                            const newBId = prompt("ID Cabang baru (atau biarkan kosong):");
+                            if (newBId !== null) updateDoc(doc(db, 'users', u.id), { branchId: newBId });
+                          }}
+                          className="p-2 text-text-dim hover:text-white"
+                        >
+                          <Settings size={14} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1374,20 +1475,22 @@ export default function App() {
                 <div className="space-y-4">
                   {filteredProductsByProvider.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase())).map(p => (
                     <div key={p.id} className="glass-card overflow-hidden border-white/5 hover:border-accent-blue/20 transition-all p-3 space-y-3">
-                      <div className="flex justify-between items-center mb-1">
-                        <div className="flex items-center gap-2">
-                           <div className="w-1.5 h-6 bg-accent-blue rounded-full"></div>
-                           <h3 className="text-sm font-black uppercase tracking-tight">{p.name}</h3>
+                        <div className="flex justify-between items-center mb-1">
+                          <div className="flex items-center gap-2">
+                             <div className="w-1.5 h-6 bg-accent-blue rounded-full"></div>
+                             <h3 className="text-sm font-black uppercase tracking-tight">{p.name}</h3>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            {userData?.role === 'admin' && (
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); handleDeleteProduct(p.id); }}
+                                className="p-2 text-red-500/60 hover:text-red-500 transition-colors"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            )}
+                          </div>
                         </div>
-                        {userData?.role === 'admin' && (
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); handleDeleteProduct(p.id); }}
-                            className="p-2 bg-red-500/10 text-red-500 rounded-lg"
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        )}
-                      </div>
                       
                       <div className="grid grid-cols-1 gap-2">
                         {p.variants && Array.isArray(p.variants) && p.variants.map((v: any, vIdx: number) => {
@@ -1400,12 +1503,24 @@ export default function App() {
                              className="w-full bg-white/5 p-3 rounded-xl text-left border border-white/5 hover:border-accent-blue/30 transition-all"
                             >
                              <div className="flex justify-between items-start">
-                                <span className="text-[11px] font-bold text-text-main line-clamp-1">{v.description || v.name}</span>
-                                <div className="text-right ml-2 shrink-0">
-                                  <span className="text-[10px] text-accent-blue font-black block">Rp {v.sellingPrice?.toLocaleString()}</span>
-                                  <span className={`text-[8px] font-bold uppercase tracking-tighter ${currentInv.stock > 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                    {currentInv.stock > 0 ? `Stok: ${currentInv.stock}` : 'Kosong'}
-                                  </span>
+                                <div className="flex-1">
+                                   <span className="text-[11px] font-bold text-text-main line-clamp-1">{v.description || v.name}</span>
+                                </div>
+                                <div className="flex items-center gap-2 ml-2">
+                                   {userData?.role === 'admin' && (
+                                     <div 
+                                       onClick={(e) => { e.stopPropagation(); handleDeleteVariant(p.id, v.id || v.name); }} 
+                                       className="p-1.5 hover:bg-red-500/10 rounded-lg group/del transition-colors cursor-pointer"
+                                     >
+                                       <Trash2 size={12} className="text-red-500/30 group-hover/del:text-red-500" />
+                                     </div>
+                                   )}
+                                   <div className="text-right shrink-0">
+                                      <span className="text-[10px] text-accent-blue font-black block">Rp {v.sellingPrice?.toLocaleString()}</span>
+                                      <span className={`text-[8px] font-bold uppercase tracking-tighter ${currentInv.stock > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                        {currentInv.stock > 0 ? `Stok: ${currentInv.stock}` : 'Kosong'}
+                                      </span>
+                                   </div>
                                 </div>
                              </div>
                             </button>
@@ -1762,6 +1877,14 @@ export default function App() {
                             <div key={`${sn}-${sIdx}`} className="flex justify-between items-center p-3 bg-white/5 rounded-xl border border-white/5 group">
                               <span className="text-[10px] font-mono tracking-wider">{sn}</span>
                               <div className="flex items-center gap-2">
+                                {(userData?.role === 'admin' || userData?.role === 'audit') && (
+                                  <button 
+                                    onClick={() => handleDeleteSN(sn)}
+                                    className="p-1.5 text-red-500/60 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                )}
                                 {userData?.role === 'employee' && (
                                   <button 
                                     onClick={() => {
@@ -2105,7 +2228,11 @@ export default function App() {
   }, [userData]);
 
   return (
-    <div className="min-h-screen bg-gray-900 text-text-main pb-24 md:pb-0 md:pl-24 font-sans selection:bg-accent-blue/30 overflow-x-hidden">
+    <div 
+      className="min-h-screen bg-gray-950 text-text-main pb-24 md:pb-0 md:pl-24 font-sans selection:bg-accent-blue/30 overflow-x-hidden outline-none border-none ring-0 focus:outline-none"
+      style={{ WebkitTapHighlightColor: 'transparent' }}
+    >
+      <div className="fixed top-0 left-0 right-0 h-px bg-gray-950 z-[300] pointer-events-none"></div>
       {/* App Loader */}
       {isAppLoading && (
         <div className="fixed inset-0 z-[200] bg-gray-950 flex flex-col items-center justify-center p-6 text-center animate-out fade-out duration-700 fill-mode-forwards" style={{ animationDelay: '800ms' }}>
