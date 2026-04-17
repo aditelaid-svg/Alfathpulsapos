@@ -158,8 +158,8 @@ export default function App() {
     }
   };
 
-  const [confirmModal, setConfirmModal] = useState<{ show: boolean, onConfirm: () => void, title: string, message: string }>({ 
-    show: false, onConfirm: () => {}, title: '', message: '' 
+  const [confirmModal, setConfirmModal] = useState<{ show: boolean, onConfirm: () => void, title: string, message: string, confirmText?: string, cancelText?: string }>({ 
+    show: false, onConfirm: () => {}, title: '', message: '', confirmText: 'Ya, Hapus', cancelText: 'Batal'
   });
 
   const handleDeleteProduct = async (productId: string) => {
@@ -336,6 +336,7 @@ export default function App() {
       show: true,
       title: "Konfirmasi Logout",
       message: "Apakah Anda yakin ingin keluar dari sistem Alpatpulsa?",
+      confirmText: "Ya, Keluar",
       onConfirm: async () => {
         setIsAppLoading(true);
         try {
@@ -1374,7 +1375,7 @@ export default function App() {
                           <div className="space-y-1">
                             <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Harga Beli</p>
                             <input 
-                              type="number" placeholder="0" 
+                              type="number" inputMode="numeric" placeholder="0" 
                               className="w-full bg-black/40 border border-glass-border p-3 rounded-xl text-xs text-white focus:outline-none focus:border-accent-blue" 
                               value={newProduct.variant.modalPrice === 0 ? '' : newProduct.variant.modalPrice}
                               onChange={e => {
@@ -1387,7 +1388,7 @@ export default function App() {
                           <div className="space-y-1">
                             <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Harga Jual</p>
                             <input 
-                              type="number" placeholder="0" 
+                              type="number" inputMode="numeric" placeholder="0" 
                               className="w-full bg-black/40 border border-glass-border p-3 rounded-xl text-xs text-green-400 font-bold focus:outline-none focus:border-green-500" 
                               value={newProduct.variant.sellingPrice === 0 ? '' : newProduct.variant.sellingPrice}
                               onChange={e => {
@@ -1400,7 +1401,7 @@ export default function App() {
                           <div className="space-y-1">
                             <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Limit Stok (Alert)</p>
                             <input 
-                              type="number" placeholder="5" 
+                              type="number" inputMode="numeric" placeholder="5" 
                               className="w-full bg-black/40 border border-glass-border p-3 rounded-xl text-xs text-red-400 font-bold focus:outline-none focus:border-red-500" 
                               value={newProduct.variant.minStock}
                               onChange={e => {
@@ -1438,7 +1439,7 @@ export default function App() {
                             <div className="space-y-1 col-span-2">
                               <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Jml Pcs (Stok)</p>
                               <input 
-                                type="number" min="1"
+                                type="number" inputMode="numeric" min="1"
                                 className="w-full bg-black/50 border border-accent-blue/30 p-3 rounded-xl text-xs text-white focus:outline-none focus:border-accent-blue text-center font-bold" 
                                 value={newProduct.qty} 
                                 onChange={e => setNewProduct({...newProduct, qty: Number(e.target.value)})} 
@@ -1521,7 +1522,7 @@ export default function App() {
                           <div className="space-y-1">
                             <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Harga Modal</p>
                             <input 
-                              type="number" placeholder="0" 
+                              type="number" inputMode="numeric" placeholder="0" 
                               className="w-full bg-black/40 border border-glass-border p-3 rounded-xl text-xs text-white focus:outline-none focus:border-accent-blue" 
                               value={newProduct.variant.modalPrice === 0 ? '' : newProduct.variant.modalPrice}
                               onChange={e => {
@@ -1534,7 +1535,7 @@ export default function App() {
                           <div className="space-y-1">
                             <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Harga Jual</p>
                             <input 
-                              type="number" placeholder="0" 
+                              type="number" inputMode="numeric" placeholder="0" 
                               className="w-full bg-black/40 border border-glass-border p-3 rounded-xl text-xs text-green-400 font-bold focus:outline-none focus:border-green-500" 
                               value={newProduct.variant.sellingPrice === 0 ? '' : newProduct.variant.sellingPrice}
                               onChange={e => {
@@ -1547,7 +1548,7 @@ export default function App() {
                           <div className="space-y-1">
                             <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Limit Stok (Alert)</p>
                             <input 
-                              type="number" placeholder="5" 
+                              type="number" inputMode="numeric" placeholder="5" 
                               className="w-full bg-black/40 border border-glass-border p-3 rounded-xl text-xs text-red-400 font-bold focus:outline-none focus:border-red-500" 
                               value={newProduct.variant.minStock}
                               onChange={e => {
@@ -2002,7 +2003,7 @@ export default function App() {
                              <div className="space-y-1">
                                <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Jumlah (Pcs)</p>
                                <input 
-                                 type="number"
+                                 type="number" inputMode="numeric"
                                  placeholder="Jumlah Pcs"
                                  className="w-full bg-black/40 border border-white/10 p-3 rounded-xl text-xs focus:outline-none focus:border-accent-blue/50"
                                  value={batchSNConfig.qty || ''}
@@ -2767,14 +2768,14 @@ export default function App() {
                 onClick={confirmModal.onConfirm}
                 className="flex-1 py-4 bg-red-500 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-lg shadow-red-500/20 active:scale-95 transition"
               >
-                {confirmModal.title === "Produk Duplikat" ? "Tutup" : "Ya, Hapus"}
+                {confirmModal.title === "Produk Duplikat" ? (confirmModal.confirmText || "Tutup") : (confirmModal.confirmText || "Ya, Hapus")}
               </button>
               {confirmModal.title !== "Produk Duplikat" && (
                 <button 
                   onClick={() => setConfirmModal(prev => ({ ...prev, show: false }))}
                   className="px-6 py-4 glass-card border-white/10 opacity-70 font-bold uppercase tracking-widest text-[10px] active:scale-95 transition"
                 >
-                  Batal
+                  {confirmModal.cancelText || "Batal"}
                 </button>
               )}
             </div>
