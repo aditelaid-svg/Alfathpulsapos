@@ -203,14 +203,19 @@ export default function App() {
 
           onSnapshot(userRef, (doc) => {
             setUserData(doc.data());
+            // Delay hide loading to ensure initial data is fetched
+            setTimeout(() => setIsAppLoading(false), 1200);
           }, (error) => {
             handleFirestoreError(error, OperationType.GET, `users/${u.uid}`);
+            setIsAppLoading(false);
           });
         } catch (error) {
           handleFirestoreError(error, OperationType.GET, `users/${u.uid}`);
+          setIsAppLoading(false);
         }
       } else {
         setUserData(null);
+        setIsAppLoading(false);
       }
     });
     return unsubAuth;
@@ -584,6 +589,8 @@ export default function App() {
     variant: any | null
   }>({ category: 'voucher', provider: null, product: null, variant: null });
 
+  const [isAppLoading, setIsAppLoading] = useState(true);
+
   const goBack = () => {
     if (viewState.variant) setViewState({ ...viewState, variant: null });
     else if (viewState.product) setViewState({ ...viewState, product: null });
@@ -687,56 +694,120 @@ export default function App() {
 
     switch (activeMenu) {
       case 'dashboard':
+        const dailyTx = transactions.filter(t => {
+          const txDate = t.timestamp?.toDate().toDateString();
+          const today = new Date().toDateString();
+          return txDate === today && (userData?.role === 'admin' || t.branchId === selectedBranch);
+        });
+        const totalDaily = dailyTx.reduce((acc, curr) => acc + curr.totalAmount, 0);
+
+        const lowStockItems = [];
+        if (userData?.role === 'admin') {
+          for (const b of branches) {
+            // This is a bit heavy, in production we'd do a server-side query or optimized state
+            // For now, let's just use the current branch inventory if it's there
+          }
+        }
+
+        if (userData?.role === 'admin') {
+          return (
+            <div className="space-y-4 pb-10">
+              <div className="flex justify-between items-center mb-1 px-1">
+                 <h2 className="text-lg font-black text-white tracking-widest uppercase">Pusat Kendali</h2>
+                 <select 
+                    className="bg-gray-800 text-[10px] border border-glass-border px-3 py-1.5 rounded-xl focus:outline-none"
+                    value={selectedBranch || ''}
+                    onChange={e => setSelectedBranch(e.target.value)}
+                  >
+                    {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                 <div className="glass-card p-4 border-accent-blue/20 bg-accent-blue/5">
+                    <p className="text-[8px] font-bold text-accent-blue/60 uppercase tracking-widest mb-1">Total Katalog</p>
+                    <p className="text-xl font-black tracking-tighter">{products.length}</p>
+                 </div>
+                 <div className="glass-card p-4 border-white/10">
+                    <p className="text-[8px] font-bold text-text-dim uppercase tracking-widest mb-1">Cabang Aktif</p>
+                    <p className="text-xl font-black tracking-tighter">{branches.length}</p>
+                 </div>
+              </div>
+
+              <section className="space-y-2">
+                 <h3 className="text-[9px] font-bold text-text-dim uppercase tracking-[0.2em] px-1">Omset Harian (Global)</h3>
+                 <div className="glass-card p-5 space-y-4 border-accent-blue/30 bg-gradient-to-br from-accent-blue/10 to-transparent">
+                    <div className="flex justify-between items-end">
+                      <div>
+                        <p className="text-2xl font-black text-white tracking-tight">{formatRupiah(totalDaily)}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[9px] font-bold text-accent-blue uppercase tracking-tighter">{dailyTx.length} Transaksi</p>
+                      </div>
+                    </div>
+                    <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
+                       <div className="bg-accent-blue h-full animate-pulse" style={{ width: '65%' }}></div>
+                    </div>
+                 </div>
+              </section>
+
+              <section className="space-y-3 mt-4">
+                 <div className="flex justify-between items-center px-1">
+                    <h3 className="text-[9px] font-bold text-text-dim uppercase tracking-[0.2em]">Ringkasan Stok Cabang</h3>
+                    <span className="text-[10px] font-bold text-accent-blue">{Object.values(branchInventory).reduce((acc: number, curr: any) => acc + (curr.stock || 0), 0)} Unit</span>
+                 </div>
+                 <div className="grid grid-cols-2 gap-2">
+                    <div className="glass-card p-3 border-white/5 flex items-center gap-3">
+                       <div className="w-8 h-8 rounded-lg bg-green-500/10 flex items-center justify-center text-green-500"><ShoppingCart size={14} /></div>
+                       <div>
+                          <p className="text-[7px] text-text-dim uppercase font-bold">Terjual</p>
+                          <p className="text-xs font-black">{transactions.length}</p>
+                       </div>
+                    </div>
+                    <div className="glass-card p-3 border-white/5 flex items-center gap-3">
+                       <div className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center text-red-500"><RotateCcw size={14} /></div>
+                       <div>
+                          <p className="text-[7px] text-text-dim uppercase font-bold">Retur</p>
+                          <p className="text-xs font-black">{disposals.length}</p>
+                       </div>
+                    </div>
+                 </div>
+              </section>
+            </div>
+          );
+        }
+
+        // Branch View for Employees
+        const totalBranchStock = Object.values(branchInventory).reduce((acc: number, curr: any) => acc + (curr.stock || 0), 0);
+        const branchDailySales = dailyTx.length;
+        const branchDailyRevenue = dailyTx.reduce((acc, curr) => acc + curr.totalAmount, 0);
+
         return (
-          <div className="space-y-6">
-             <div className="flex justify-between items-center">
-              <h2 className="text-xl font-semibold text-text-dim">Dashboard</h2>
-              {userData?.role === 'admin' ? (
-                <select 
-                  className="bg-gray-800 text-xs border border-glass-border p-2 rounded-lg focus:outline-none"
-                  value={selectedBranch || ''}
-                  onChange={e => setSelectedBranch(e.target.value)}
-                >
-                  {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
-              ) : (
-                <div className="text-[10px] bg-accent-blue/10 text-accent-blue px-3 py-1 rounded-full border border-accent-blue/20 font-bold uppercase tracking-widest">
+          <div className="space-y-4 pb-10">
+            <div className="flex justify-between items-center mb-1 px-1">
+               <h2 className="text-lg font-black text-white tracking-widest uppercase">Statistik Toko</h2>
+               <div className="text-[8px] bg-accent-blue/10 text-accent-blue px-2 py-0.5 rounded-full font-bold border border-accent-blue/20 uppercase tracking-widest">
                   {branches.find(b => b.id === selectedBranch)?.name || 'Cabang'}
-                </div>
-              )}
+               </div>
             </div>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="glass-card p-4">
-                <p className="text-text-dim text-[10px] uppercase tracking-wider">Katalog Produk</p>
-                <div className="flex items-center justify-between">
-                  <p className="text-2xl font-bold mt-1 tracking-tight">{filteredProductsByProvider.length}</p>
-                  {userData?.role === 'admin' && (
-                    <button 
-                      onClick={cleanupDuplicates} 
-                      title="Gabungkan Duplikat"
-                      className="p-2 bg-amber-500/10 text-amber-500 rounded-lg hover:bg-amber-500/20 transition flex items-center gap-1"
-                    >
-                      <Sparkles size={14} />
-                      <span className="text-[8px] font-bold">MERGE</span>
-                    </button>
-                  )}
+
+            <div className="grid grid-cols-2 gap-3">
+                <div className="glass-card p-4 bg-accent-blue/5 border-accent-blue/20">
+                  <p className="text-[8px] font-bold text-accent-blue/60 uppercase tracking-widest mb-1">Stok Ready</p>
+                  <p className="text-xl font-black tracking-tighter">{totalBranchStock} <span className="text-[10px] font-bold opacity-50 uppercase">Pcs</span></p>
                 </div>
-              </div>
-              <div className="glass-card p-4">
-                <p className="text-text-dim text-[10px] uppercase tracking-wider">Stok di Cabang</p>
-                <p className="text-2xl font-bold mt-1 tracking-tight">
-                  {Object.values(branchInventory).reduce((acc: number, curr: any) => acc + (curr.stock || 0), 0)}
-                </p>
-              </div>
-              <div className="glass-card p-4">
-                <p className="text-text-dim text-[10px] uppercase tracking-wider">Jumlah Cabang</p>
-                <p className="text-2xl font-bold mt-1 tracking-tight">{branches.length}</p>
-              </div>
-              <div className="glass-card p-4">
-                <p className="text-text-dim text-[10px] uppercase tracking-wider">Total Karyawan</p>
-                <p className="text-2xl font-bold mt-1 tracking-tight">{allUsers.length || userData?.role === 'admin' ? allUsers.length : '1'}</p>
-              </div>
+                <div className="glass-card p-4 border-white/10">
+                  <p className="text-[8px] font-bold text-text-dim uppercase tracking-widest mb-1">Sales Hari Ini</p>
+                  <p className="text-xl font-black tracking-tighter">{branchDailySales} <span className="text-[10px] font-bold opacity-50 uppercase">Item</span></p>
+                </div>
             </div>
+
+            <section className="bg-accent-blue/10 border border-accent-blue/20 p-5 rounded-3xl relative overflow-hidden group">
+               <Sparkles className="absolute -top-4 -right-4 text-accent-blue/20 group-hover:scale-110 transition-transform" size={120} />
+               <h3 className="text-[9px] font-bold text-accent-blue uppercase tracking-widest relative z-10 mb-2">Pencapaian Omset</h3>
+               <p className="text-2xl font-black tracking-tight text-white relative z-10">{formatRupiah(branchDailyRevenue)}</p>
+               <p className="text-[8px] text-accent-blue/70 relative z-10 uppercase font-bold mt-2 tracking-widest italic">Target per hari: Capai omset maksimal!</p>
+            </section>
           </div>
         );
       case 'system':
@@ -1971,20 +2042,40 @@ export default function App() {
   }, [userData]);
 
   return (
-    <div className="min-h-screen bg-gray-900 text-text-main pb-24 md:pb-0 md:pl-24">
-      <div className="max-w-2xl mx-auto p-4 md:p-8">
-        <header className="mb-6 flex justify-between items-center pt-4">
+    <div className="min-h-screen bg-gray-900 text-text-main pb-24 md:pb-0 md:pl-24 font-sans selection:bg-accent-blue/30 overflow-x-hidden">
+      {/* App Loader */}
+      {isAppLoading && (
+        <div className="fixed inset-0 z-[200] bg-gray-950 flex flex-col items-center justify-center p-6 text-center animate-out fade-out duration-700 fill-mode-forwards" style={{ animationDelay: '800ms' }}>
+          <div className="relative mb-8">
+            <div className="w-20 h-20 rounded-2xl bg-accent-blue/20 flex items-center justify-center animate-pulse">
+               <Sparkles size={40} className="text-accent-blue" />
+            </div>
+            <div className="absolute -inset-1 rounded-2xl bg-accent-blue/20 blur-xl animate-pulse"></div>
+          </div>
+          <h2 className="text-2xl font-black bg-gradient-to-r from-white to-accent-blue bg-clip-text text-transparent tracking-tighter mb-2">ALPATPULSA</h2>
+          <p className="text-[10px] text-accent-blue/50 font-bold uppercase tracking-[0.4em] mb-8">Initializing System...</p>
+          <div className="w-48 h-1 bg-white/5 rounded-full overflow-hidden relative">
+             <div className="absolute inset-0 bg-accent-blue h-full animate-loading-bar rounded-full shadow-[0_0_10px_#4F46E5]"></div>
+          </div>
+        </div>
+      )}
+
+      <div className="max-w-lg mx-auto p-3 md:p-8 flex flex-col min-h-screen">
+        <header className="mb-4 flex justify-between items-center pt-2 px-1">
           <div className="flex flex-col">
-            <h1 className="text-2xl md:text-3xl font-black bg-gradient-to-r from-white to-accent-blue bg-clip-text text-transparent tracking-tighter">ALPATPULSA</h1>
-            <p className="text-[10px] text-accent-blue/50 font-bold uppercase tracking-[0.3em]">Inventory System</p>
+            <h1 className="text-xl md:text-2xl font-black bg-gradient-to-r from-white to-accent-blue bg-clip-text text-transparent tracking-tighter leading-none">ALPATPULSA</h1>
+            <p className="text-[8px] text-accent-blue/50 font-bold uppercase tracking-[0.3em] mt-1">Inventory Management</p>
           </div>
           {user && (
-            <div className="flex items-center gap-4">
-              <div className="hidden md:block text-right">
-                <p className="text-xs font-bold">{user.displayName || 'User'}</p>
-                <p className="text-[9px] text-text-dim uppercase tracking-widest">{userData?.role}</p>
+            <div className="flex items-center gap-3">
+              <div className="hidden sm:block text-right">
+                <p className="text-[10px] font-bold leading-tight">{user.displayName || 'User'}</p>
+                <p className="text-[7px] text-text-dim uppercase tracking-widest">{userData?.role}</p>
               </div>
-              <button onClick={() => auth.signOut()} className="w-10 h-10 rounded-full bg-accent-blue/10 border border-accent-blue/30 flex items-center justify-center text-xs font-bold hover:bg-accent-blue hover:text-gray-900 transition-all">
+              <button 
+                onClick={() => auth.signOut()} 
+                className="w-8 h-8 rounded-lg bg-accent-blue/10 border border-accent-blue/30 flex items-center justify-center text-[10px] font-extrabold hover:bg-accent-blue hover:text-gray-900 transition-all shadow-lg active:scale-95"
+              >
                 {user.email?.[0].toUpperCase()}
               </button>
             </div>
