@@ -321,10 +321,30 @@ export default function App() {
     setShowAddBranch(false);
   };
 
-  const approveUser = async (userId: string, branchId: string) => {
+  const approveUser = async (userId: string, branchId: string, role: string) => {
     await updateDoc(doc(db, 'users', userId), {
       isApproved: true,
-      branchId: branchId
+      branchId: branchId,
+      role: role
+    });
+  };
+
+  const handleLogout = () => {
+    setConfirmModal({
+      show: true,
+      title: "Konfirmasi Logout",
+      message: "Apakah Anda yakin ingin keluar dari sistem Alpatpulsa?",
+      onConfirm: async () => {
+        setIsAppLoading(true);
+        try {
+          await auth.signOut();
+          setConfirmModal(prev => ({ ...prev, show: false }));
+        } catch (error) {
+          console.error("Logout error", error);
+        } finally {
+          setIsAppLoading(false);
+        }
+      }
     });
   };
 
@@ -677,6 +697,23 @@ export default function App() {
   };
 
   const renderContent = () => {
+    if (!userData && user) {
+      return (
+        <div className="flex flex-col items-center justify-center mt-32 space-y-6 animate-in fade-in duration-500">
+           <div className="relative">
+              <div className="w-16 h-16 border-[3px] border-accent-blue/10 border-t-accent-blue rounded-full animate-spin"></div>
+              <div className="absolute inset-0 flex items-center justify-center">
+                 <div className="w-8 h-8 bg-accent-blue/10 rounded-full animate-pulse"></div>
+              </div>
+           </div>
+           <div className="text-center space-y-1">
+              <p className="text-[10px] text-accent-blue font-black uppercase tracking-[0.4em]">Database Sync</p>
+              <p className="text-[8px] text-text-dim uppercase tracking-widest leading-relaxed">Menghubungkan ke server Alpatpulsa...</p>
+           </div>
+        </div>
+      );
+    }
+
     if (!userData?.isApproved && userData?.role !== 'admin') {
       return (
         <div className="flex flex-col items-center justify-center mt-20 space-y-6 text-center px-6">
@@ -875,22 +912,48 @@ export default function App() {
                             <p className="text-[10px] text-text-dim">{u.email}</p>
                           </div>
                         </div>
-                        <div className="flex gap-2">
-                          <select 
-                            id={`branch-select-${u.id}`}
-                            className="flex-1 bg-gray-800 border border-glass-border text-xs p-2 rounded-lg focus:outline-none"
-                          >
-                            <option value="">Pilih Penempatan Cabang</option>
-                            {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                          </select>
+                        <div className="space-y-3">
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                              <p className="text-[8px] font-bold text-text-dim uppercase tracking-widest ml-1">Penempatan Cabang</p>
+                              <select 
+                                id={`branch-select-${u.id}`}
+                                className="w-full bg-gray-950 border border-white/10 text-[10px] p-2.5 rounded-xl focus:outline-none focus:border-accent-blue/50"
+                              >
+                                <option value="">Pilih Cabang</option>
+                                {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                              </select>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-[8px] font-bold text-text-dim uppercase tracking-widest ml-1">Jabatan / Role</p>
+                              <select 
+                                id={`role-select-${u.id}`}
+                                className="w-full bg-gray-950 border border-white/10 text-[10px] p-2.5 rounded-xl focus:outline-none focus:border-accent-blue/50"
+                              >
+                                <option value="employee">Karyawan</option>
+                                <option value="audit">Auditor</option>
+                                <option value="admin">Admin / Bos</option>
+                              </select>
+                            </div>
+                          </div>
                           <button 
                             onClick={() => {
                               const bId = (document.getElementById(`branch-select-${u.id}`) as HTMLSelectElement).value;
-                              if (bId) approveUser(u.id, bId);
+                              const role = (document.getElementById(`role-select-${u.id}`) as HTMLSelectElement).value;
+                              if (bId) approveUser(u.id, bId, role);
+                              else if (role === 'admin' || role === 'audit') approveUser(u.id, 'all', role);
+                              else {
+                                setConfirmModal({
+                                  show: true,
+                                  title: "Penempatan Diperlukan",
+                                  message: "Harap pilih cabang penempatan untuk akun karyawan.",
+                                  onConfirm: () => setConfirmModal(prev => ({ ...prev, show: false }))
+                                });
+                              }
                             }}
-                            className="bg-accent-blue text-gray-900 text-xs px-4 py-2 rounded-lg font-bold hover:scale-105 transition"
+                            className="w-full bg-accent-blue text-gray-900 text-[10px] py-3 rounded-xl font-black uppercase tracking-widest shadow-lg shadow-accent-blue/20 active:scale-95 transition"
                           >
-                            Setujui
+                            Setujui & Aktifkan Versi Pro
                           </button>
                         </div>
                       </div>
@@ -935,12 +998,12 @@ export default function App() {
 
             <section className="pt-8 text-center space-y-4">
               <button 
-                onClick={() => auth.signOut()}
-                className="w-full py-4 border border-red-500/30 text-red-500 rounded-2xl font-bold text-sm bg-red-500/5 hover:bg-red-500/10 transition"
+                onClick={handleLogout}
+                className="w-full py-4 border border-red-500/30 text-red-500 rounded-2xl font-black uppercase tracking-widest text-[10px] bg-red-500/5 hover:bg-red-500/10 transition active:scale-95"
               >
                 Keluar dari Sistem
               </button>
-              <p className="text-[8px] text-text-dim uppercase tracking-widest">Alpatpulsa System v1.0.2</p>
+              <p className="text-[8px] text-text-dim uppercase tracking-widest">Alpatpulsa System v1.0.3</p>
             </section>
           </div>
         );
@@ -2073,7 +2136,7 @@ export default function App() {
                 <p className="text-[7px] text-text-dim uppercase tracking-widest">{userData?.role}</p>
               </div>
               <button 
-                onClick={() => auth.signOut()} 
+                onClick={handleLogout} 
                 className="w-8 h-8 rounded-lg bg-accent-blue/10 border border-accent-blue/30 flex items-center justify-center text-[10px] font-extrabold hover:bg-accent-blue hover:text-gray-900 transition-all shadow-lg active:scale-95"
               >
                 {user.email?.[0].toUpperCase()}
