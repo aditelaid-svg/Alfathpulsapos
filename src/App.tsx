@@ -876,7 +876,7 @@ export default function App() {
                     value={selectedBranch || ''}
                     onChange={e => setSelectedBranch(e.target.value)}
                   >
-                    {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    {branches.sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric: true})).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                   </select>
               </div>
 
@@ -1110,7 +1110,9 @@ export default function App() {
               )}
 
               <div className="grid grid-cols-1 gap-3">
-                {branches.map(b => (
+                {branches
+                  .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
+                  .map(b => (
                   <div key={b.id} className="glass-card p-3 flex items-center gap-4 hover:border-white/20 transition-colors">
                     <div className="w-10 h-10 bg-accent-blue/10 rounded-xl flex items-center justify-center text-accent-blue">
                       <MapPin size={20} />
@@ -1166,7 +1168,7 @@ export default function App() {
                                 className="w-full bg-gray-950 border border-white/10 text-[10px] p-2.5 rounded-xl focus:outline-none focus:border-accent-blue/50"
                               >
                                 <option value="">Pilih Cabang</option>
-                                {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                                {branches.sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric: true})).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                               </select>
                             </div>
                             <div className="space-y-1">
@@ -1210,38 +1212,63 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Approved Employees Settings */}
+                {/* Approved Employees & Admins Settings */}
                 <div className="space-y-3 mt-6">
-                  <h3 className="text-[10px] font-bold text-text-dim uppercase tracking-widest px-1">Daftar Pegawai Aktif</h3>
-                  {allUsers.filter(u => u.isApproved && u.role !== 'admin').map(u => (
-                    <div key={u.id} className="glass-card p-2 flex items-center justify-between border-white/5">
+                  <h3 className="text-[10px] font-bold text-text-dim uppercase tracking-widest px-1">Daftar Akun Aktif (Owner & Pegawai)</h3>
+                  {allUsers
+                    .filter(u => u.isApproved)
+                    .sort((a, b) => {
+                      if (a.role === 'admin' && b.role !== 'admin') return -1;
+                      if (a.role !== 'admin' && b.role === 'admin') return 1;
+                      return a.name.localeCompare(b.name);
+                    })
+                    .map(u => (
+                    <div key={u.id} className={`glass-card p-2 flex items-center justify-between transition-all ${u.role === 'admin' ? 'border-accent-blue/30 bg-accent-blue/5' : 'border-white/5'}`}>
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-[8px] font-bold border border-white/10 uppercase">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[8px] font-bold border uppercase ${u.role === 'admin' ? 'bg-accent-blue/20 border-accent-blue/50 text-accent-blue' : 'bg-white/5 border-white/10'}`}>
                           {u.name[0]}
                         </div>
                         <div>
-                          <p className="text-xs font-bold">{u.name}</p>
+                          <div className="flex items-center gap-2">
+                             <p className="text-xs font-bold">{u.name}</p>
+                             {u.role === 'admin' && <span className="text-[7px] bg-accent-blue text-gray-900 px-1 rounded font-black uppercase tracking-tighter">Owner</span>}
+                          </div>
                           <p className="text-[8px] text-accent-blue font-medium uppercase tracking-tighter">
-                            {branches.find(b => b.id === u.branchId)?.name || 'Pindah Cabang?'}
+                            {u.role === 'admin' ? 'All Access (Admin)' : (branches.find(b => b.id === u.branchId)?.name || 'Pindah Cabang?')}
                           </p>
                         </div>
                       </div>
                       <div className="flex items-center gap-1">
+                        {/* Only allow deleting if not current user OR if admin has confirmation */}
                         <button 
-                          onClick={() => handleDeleteUser(u.id)}
+                          onClick={() => {
+                            if (u.id === auth.currentUser?.uid) {
+                              setConfirmModal({
+                                show: true,
+                                title: "Peringatan Diri Sendiri",
+                                message: "Anda tidak bisa menghapus akun Anda sendiri melalui menu ini.",
+                                confirmText: "Tutup",
+                                onConfirm: () => setConfirmModal(prev => ({ ...prev, show: false }))
+                              });
+                              return;
+                            }
+                            handleDeleteUser(u.id);
+                          }}
                           className="p-2 text-red-500/60 hover:text-red-500"
                         >
                           <Trash2 size={14} />
                         </button>
-                        <button 
-                          onClick={() => {
-                            const newBId = prompt("ID Cabang baru (atau biarkan kosong):");
-                            if (newBId !== null) updateDoc(doc(db, 'users', u.id), { branchId: newBId });
-                          }}
-                          className="p-2 text-text-dim hover:text-white"
-                        >
-                          <Settings size={14} />
-                        </button>
+                        {u.role !== 'admin' && (
+                          <button 
+                            onClick={() => {
+                              const newBId = prompt("ID Cabang baru (atau biarkan kosong):");
+                              if (newBId !== null) updateDoc(doc(db, 'users', u.id), { branchId: newBId });
+                            }}
+                            className="p-2 text-text-dim hover:text-white"
+                          >
+                            <Settings size={14} />
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -2581,7 +2608,7 @@ export default function App() {
                         onChange={e => setTransferConfig({...transferConfig, fromBranchId: e.target.value})}
                       >
                          <option value="">Pilih Cabang Asal</option>
-                         {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                         {branches.sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric: true})).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                       </select>
                    </div>
                    <div className="space-y-1">
@@ -2592,7 +2619,7 @@ export default function App() {
                         onChange={e => setTransferConfig({...transferConfig, toBranchId: e.target.value})}
                       >
                          <option value="">Pilih Cabang Tujuan</option>
-                         {branches.filter(b => b.id !== transferConfig.fromBranchId).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                         {branches.filter(b => b.id !== transferConfig.fromBranchId).sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric: true})).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                       </select>
                    </div>
                 </div>
