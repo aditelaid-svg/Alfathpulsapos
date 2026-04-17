@@ -1,0 +1,24 @@
+{
+  "name": "Alpatpulsa Inventory",
+  "short_name": "Alpatpulsa",
+  "description": "Aplikasi rekap voucher dan perdana antar cabang Alpatpulsa.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0b",
+  "theme_color": "#3b82f6",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "https://picsum.photos/seed/alpat/192/192",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://picsum.photos/seed/alpat/512/512",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

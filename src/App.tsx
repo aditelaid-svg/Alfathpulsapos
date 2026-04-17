@@ -1,0 +1,2256 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useEffect } from 'react';
+import { db, auth } from './firebase';
+import { collection, onSnapshot, addDoc, serverTimestamp, doc, setDoc, updateDoc, getDoc, deleteDoc } from 'firebase/firestore';
+import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
+import { LayoutDashboard, ShoppingCart, Package, Store, Settings, Plus, ChevronRight, Hash, QrCode, UserCheck, ShieldAlert, MapPin, Trash2, Camera, X, Sparkles, ArrowLeftRight, RotateCcw, FileText, History, LogOut } from 'lucide-react';
+import CameraScanner from './components/CameraScanner';
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  // We don't throw here to avoid crashing the whole app, but we log it clearly
+}
+
+export default function App() {
+  const [products, setProducts] = useState<any[]>([]);
+  const [branches, setBranches] = useState<any[]>([]);
+  const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [user, setUser] = useState(auth.currentUser);
+  const [userData, setUserData] = useState<any>(null);
+  const [activeMenu, setActiveMenu] = useState('dashboard');
+  const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
+  const [branchInventory, setBranchInventory] = useState<any>({});
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('voucher');
+  const [filterProvider, setFilterProvider] = useState<string | null>(null);
+
+  const filteredProducts = products.filter(p => {
+    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                          p.provider.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesCategory = p.category === selectedCategory;
+    const matchesProvider = filterProvider ? p.provider === filterProvider : true;
+    return matchesSearch && matchesCategory && matchesProvider;
+  });
+
+  const providers = Array.from(new Set(products.filter(p => p.category === selectedCategory).map(p => p.provider))) as string[];
+  
+  // Form States
+  const [showAddProduct, setShowAddProduct] = useState(false);
+  const [showAddBranch, setShowAddBranch] = useState(false);
+  const [newBranch, setNewBranch] = useState({ name: '', location: '' });
+  const [newProduct, setNewProduct] = useState({
+    name: '',
+    provider: 'Telkomsel',
+    category: 'voucher',
+    targetProductId: '', // For adding to existing product (kept for backward schema compat but hidden from UI)
+    variant: { id: Math.random().toString(36).substr(2, 9), modalPrice: 0, sellingPrice: 0, description: '' },
+    sn: '',
+    qty: 1
+  });
+
+  const [showBatchSN, setShowBatchSN] = useState(false);
+  const [showRangeSN, setShowRangeSN] = useState(false);
+  const [batchSNConfig, setBatchSNConfig] = useState({ sn: '', qty: 1 });
+  const [rangeSNConfig, setRangeSNConfig] = useState({ start: '', end: '' });
+  const [singleSNInput, setSingleSNInput] = useState('');
+  const [posScannerInput, setPosScannerInput] = useState('');
+  const [cart, setCart] = useState<any[]>([]);
+  const [posStatus, setPosStatus] = useState({ message: '', type: 'info' });
+  const [showCameraScanner, setShowCameraScanner] = useState<'stock' | 'pos' | 'stock-initial' | null>(null);
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [transfers, setTransfers] = useState<any[]>([]);
+  const [disposals, setDisposals] = useState<any[]>([]);
+  
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferConfig, setTransferConfig] = useState({ toBranchId: '', productId: '', variantId: '', sns: [] as string[] });
+  const [showDisposalModal, setShowDisposalModal] = useState(false);
+  const [disposalConfig, setDisposalConfig] = useState({ productId: '', variantId: '', sns: [] as string[], reason: 'broken' });
+
+  const providersList = ['Telkomsel', 'Indosat', 'XL', 'Axis', 'Three', 'Smartfren', 'Lainnya'];
+  const brandsList = ['Robot', 'Vivan', 'Baseus', 'Oppo', 'Samsung', 'Vivo', 'Xiaomi', 'Rexi', 'Foomee', 'Lainnya'];
+  const accessoryTypes = ['Charger', 'Headset', 'Kabel Data', 'Powerbank', 'Tempered Glass', 'Memory Card', 'Speaker', 'Earphone', 'Casing', 'Adaptor', 'Lainnya'];
+  const voucherTypes = ['Voucher Internet', 'Voucher Game', 'Voucher PLN', 'Lainnya'];
+  const perdanaTypes = ['Kartu Perdana', 'Perdana Internet', 'Lainnya'];
+
+  const formatRupiah = (num: number) => {
+    return new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    }).format(num);
+  };
+
+  useEffect(() => {
+    // Reset provider when category changes to ensure it matches the correct list (Brand vs Provider)
+    if (newProduct.category === 'aksesoris') {
+      if (!brandsList.includes(newProduct.provider)) {
+        setNewProduct(prev => ({ ...prev, provider: brandsList[0] }));
+      }
+    } else {
+      if (!providersList.includes(newProduct.provider)) {
+        setNewProduct(prev => ({ ...prev, provider: providersList[0] }));
+      }
+    }
+  }, [newProduct.category]);
+
+  const getProviderColor = (provider: string) => {
+    switch (provider) {
+      case 'Telkomsel': return 'text-red-500 bg-red-500/10 border-red-500/20';
+      case 'Indosat': return 'text-yellow-500 bg-yellow-500/10 border-yellow-500/20';
+      case 'XL': return 'text-blue-500 bg-blue-500/10 border-blue-500/20';
+      case 'Axis': return 'text-purple-500 bg-purple-500/10 border-purple-500/20';
+      case 'Three': return 'text-white bg-white/10 border-white/20';
+      case 'Smartfren': return 'text-pink-500 bg-pink-500/10 border-pink-500/20';
+      default: return 'text-text-dim bg-white/5 border-white/10';
+    }
+  };
+
+  const [confirmModal, setConfirmModal] = useState<{ show: boolean, onConfirm: () => void, title: string, message: string }>({ 
+    show: false, onConfirm: () => {}, title: '', message: '' 
+  });
+
+  const handleDeleteProduct = async (productId: string) => {
+    setConfirmModal({
+      show: true,
+      title: "Hapus Produk",
+      message: "Hapus produk ini secara permanen dari pusat? Data stok di semua cabang juga akan terputus dari master ini.",
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'products', productId));
+          if (viewState.product?.id === productId) setViewState({ ...viewState, product: null, variant: null });
+          setConfirmModal(prev => ({ ...prev, show: false }));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, `products/${productId}`);
+        }
+      }
+    });
+  };
+
+  useEffect(() => {
+    const unsubAuth = auth.onAuthStateChanged(async (u) => {
+      setUser(u);
+      if (u) {
+        const userRef = doc(db, 'users', u.uid);
+        try {
+          const userSnap = await getDoc(userRef);
+          
+          if (!userSnap.exists()) {
+            const isOwner = u.email === "aditelaid@gmail.com";
+            const initialData = {
+              email: u.email,
+              name: u.displayName || 'User',
+              role: isOwner ? 'admin' : 'employee',
+              isApproved: isOwner ? true : false,
+              branchId: '',
+              createdAt: serverTimestamp()
+            };
+            await setDoc(userRef, initialData);
+            setUserData(initialData);
+          } else {
+            setUserData(userSnap.data());
+          }
+
+          onSnapshot(userRef, (doc) => {
+            setUserData(doc.data());
+          }, (error) => {
+            handleFirestoreError(error, OperationType.GET, `users/${u.uid}`);
+          });
+        } catch (error) {
+          handleFirestoreError(error, OperationType.GET, `users/${u.uid}`);
+        }
+      } else {
+        setUserData(null);
+      }
+    });
+    return unsubAuth;
+  }, []);
+
+  useEffect(() => {
+    if (userData?.isApproved || userData?.role === 'admin') {
+      const unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
+        setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'products');
+      });
+
+      // Isolate branch fetching: Admins see all, Employees see only their one branch
+      let unsubBranches = () => {};
+      
+      if (userData?.role === 'admin') {
+        const branchesRef = collection(db, 'branches');
+        unsubBranches = onSnapshot(branchesRef, (snapshot) => {
+          const branchData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          setBranches(branchData);
+          if (branchData.length > 0 && !selectedBranch) setSelectedBranch(branchData[0].id);
+        }, (error) => {
+          handleFirestoreError(error, OperationType.LIST, 'branches');
+        });
+      } else if (userData?.branchId) {
+        const branchRef = doc(db, 'branches', userData.branchId);
+        unsubBranches = onSnapshot(branchRef, (snap) => {
+          if (snap.exists()) {
+            const data = { id: snap.id, ...snap.data() };
+            setBranches([data]);
+            setSelectedBranch(snap.id);
+          }
+        }, (error) => {
+          handleFirestoreError(error, OperationType.GET, `branches/${userData.branchId}`);
+        });
+      }
+      
+      let unsubUsers = () => {};
+      if (userData?.role === 'admin') {
+        unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
+          setAllUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        }, (error) => {
+          handleFirestoreError(error, OperationType.LIST, 'users');
+        });
+      }
+
+      const unsubTransactions = onSnapshot(collection(db, 'transactions'), (snapshot) => {
+        setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      });
+
+      const unsubTransfers = onSnapshot(collection(db, 'transfers'), (snapshot) => {
+        setTransfers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      });
+
+      const unsubDisposals = onSnapshot(collection(db, 'disposals'), (snapshot) => {
+        setDisposals(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      });
+
+      return () => { 
+        unsubProducts(); 
+        unsubBranches(); 
+        unsubUsers(); 
+        unsubTransactions(); 
+        unsubTransfers(); 
+        unsubDisposals(); 
+      };
+    }
+  }, [userData, selectedBranch]);
+
+  useEffect(() => {
+    if (userData?.role !== 'admin' && userData?.branchId) {
+      setSelectedBranch(userData.branchId);
+    }
+  }, [userData]);
+
+  useEffect(() => {
+    if (selectedBranch && (userData?.isApproved || userData?.role === 'admin')) {
+      const unsubInventory = onSnapshot(collection(db, `branches/${selectedBranch}/inventory`), (snapshot) => {
+        const inv: any = {};
+        snapshot.docs.forEach(doc => {
+          inv[doc.id] = doc.data();
+        });
+        setBranchInventory(inv);
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, `branches/${selectedBranch}/inventory`);
+      });
+      return unsubInventory;
+    }
+  }, [selectedBranch, userData]);
+
+  const login = async () => {
+    await signInWithPopup(auth, new GoogleAuthProvider());
+  };
+
+  const handleAddBranch = async () => {
+    if (!newBranch.name) return;
+    await addDoc(collection(db, 'branches'), {
+      ...newBranch,
+      createdAt: serverTimestamp()
+    });
+    setNewBranch({ name: '', location: '' });
+    setShowAddBranch(false);
+  };
+
+  const approveUser = async (userId: string, branchId: string) => {
+    await updateDoc(doc(db, 'users', userId), {
+      isApproved: true,
+      branchId: branchId
+    });
+  };
+
+  const handleSaveProduct = async () => {
+    const trimmedName = newProduct.name.trim();
+    if (!trimmedName) {
+      setConfirmModal({
+        show: true,
+        title: "Input Kosong",
+        message: "Nama / Model produk harus diisi sebelum dapat disimpan.",
+        onConfirm: () => setConfirmModal(prev => ({ ...prev, show: false }))
+      });
+      return;
+    }
+
+    try {
+      // Robust number parsing
+      const modalPrice = Number(newProduct.variant.modalPrice) || 0;
+      const sellingPrice = Number(newProduct.variant.sellingPrice) || 0;
+      const variantId = Math.random().toString(36).substr(2, 9);
+      
+      const variantName = newProduct.variant.description || `Tipe ${variantId}`;
+
+      // Check if product group exists
+      const existingProduct = products.find(p => 
+        p.name?.toLowerCase() === trimmedName.toLowerCase() && 
+        p.provider === newProduct.provider &&
+        p.category === newProduct.category
+      );
+
+      let pId;
+
+      if (existingProduct) {
+        // Check if variant with same name already exists in this group
+        const isDuplicateVariant = existingProduct.variants?.some((v: any) => v.name?.toLowerCase() === variantName.toLowerCase());
+        if (isDuplicateVariant) {
+          setConfirmModal({
+            show: true,
+            title: "Tipe Duplikat",
+            message: `Tipe "${variantName}" sudah ada di produk ini. Silakan gunakan nama tipe lain.`,
+            onConfirm: () => setConfirmModal(prev => ({ ...prev, show: false }))
+          });
+          return;
+        }
+
+        // Add variant to existing product group
+        pId = existingProduct.id;
+        const currentVariants = existingProduct.variants || [];
+        await updateDoc(doc(db, 'products', pId), {
+          variants: [...currentVariants, { 
+            ...newProduct.variant, 
+            name: variantName, 
+            modalPrice, 
+            sellingPrice,
+            id: variantId 
+          }]
+        });
+      } else {
+        // Create a new product group
+        const newDocRef = await addDoc(collection(db, 'products'), {
+          name: trimmedName,
+          provider: newProduct.provider,
+          category: newProduct.category,
+          variants: [{ 
+            ...newProduct.variant, 
+            name: variantName, 
+            modalPrice, 
+            sellingPrice,
+            id: variantId 
+          }],
+          createdAt: serverTimestamp(),
+          createdBy: user?.uid || 'system'
+        });
+        pId = newDocRef.id;
+      }
+
+      // Handle Initial Stock if provided
+      if (selectedBranch && (newProduct.sn || newProduct.qty > 0)) {
+        const itemRef = doc(db, `branches/${selectedBranch}/inventory`, `${pId}_${variantId}`);
+        const currentData = branchInventory[`${pId}_${variantId}`] || { sns: [] };
+        
+        let newSns = [...currentData.sns];
+        let qtyToAdd = newProduct.category === 'aksesoris' ? (newProduct.qty > 0 ? newProduct.qty : 1) : 1;
+
+        if (newProduct.sn) {
+          // If SN is provided, add it multiple times based on qty (Batch mode logic for aksesoris)
+          // For voucher it will only loop once.
+          for (let i = 0; i < qtyToAdd; i++) {
+            newSns.push(newProduct.sn);
+          }
+        } else {
+          // No SN but has Qty, generate placeholder SNs
+          for (let i = 0; i < qtyToAdd; i++) {
+            newSns.push(`STK-${Math.random().toString(36).substr(2, 6).toUpperCase()}`);
+          }
+        }
+
+        await setDoc(itemRef, {
+          productId: pId,
+          variantId: variantId,
+          sns: newSns,
+          stock: newSns.length,
+          lastUpdated: serverTimestamp()
+        });
+      }
+
+      setShowAddProduct(false);
+      setNewProduct({
+        name: '',
+        provider: 'Telkomsel',
+        category: 'voucher',
+        targetProductId: '',
+        variant: { id: Math.random().toString(36).substr(2, 9), modalPrice: 0, sellingPrice: 0, description: '' },
+        sn: '',
+        qty: 1
+      });
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.WRITE, 'products');
+      setConfirmModal({
+        show: true,
+        title: "Gagal Menyimpan",
+        message: `Terjadi kendala saat menyimpan data: ${error.message || 'Koneksi terputus'}. Silakan coba beberapa saat lagi.`,
+        onConfirm: () => setConfirmModal(prev => ({ ...prev, show: false }))
+      });
+    }
+  };
+
+  const deleteVariant = async (productId: string, variantId: string) => {
+    const product = products.find(p => p.id === productId);
+    if (!product) return;
+
+    setConfirmModal({
+      show: true,
+      title: "Hapus Tipe/Varian",
+      message: `Hapus tipe barang ini secara permanen dari pusat? Data stok di cabang untuk tipe ini juga akan hilang.`,
+      onConfirm: async () => {
+        try {
+          const newVariants = product.variants.filter((v: any) => v.id !== variantId);
+          if (newVariants.length === 0) {
+            await deleteDoc(doc(db, 'products', productId));
+          } else {
+            await updateDoc(doc(db, 'products', productId), { variants: newVariants });
+          }
+          setViewState({ ...viewState, product: null, variant: null });
+          setConfirmModal(prev => ({ ...prev, show: false }));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, `products/${productId}/variants/${variantId}`);
+        }
+      }
+    });
+  };
+
+  const handleTransfer = async () => {
+    const { fromBranchId, toBranchId, productId, variantId, sns } = transferConfig;
+    if (!fromBranchId || !toBranchId || !productId || !variantId || sns.length === 0) return;
+    if (fromBranchId === toBranchId) return;
+
+    try {
+      const sourceRef = doc(db, `branches/${fromBranchId}/inventory`, `${productId}_${variantId}`);
+      const destRef = doc(db, `branches/${toBranchId}/inventory`, `${productId}_${variantId}`);
+      
+      const sourceSnap = await getDoc(sourceRef);
+      const destSnap = await getDoc(destRef);
+
+      if (!sourceSnap.exists()) return;
+      const sourceData = sourceSnap.data();
+      const currentSourceSns = sourceData.sns || [];
+      
+      // Update Source
+      const newSourceSns = currentSourceSns.filter((s: string) => !sns.includes(s));
+      await updateDoc(sourceRef, { 
+        sns: newSourceSns, 
+        stock: newSourceSns.length,
+        lastUpdated: serverTimestamp() 
+      });
+
+      // Update Destination
+      const destData = destSnap.data() || { sns: [], stock: 0 };
+      const newDestSns = [...destData.sns, ...sns];
+      await setDoc(destRef, {
+        productId,
+        variantId,
+        sns: newDestSns,
+        stock: newDestSns.length,
+        lastUpdated: serverTimestamp()
+      });
+
+      // Record Transfer
+      const product = products.find(p => p.id === productId);
+      const variant = product?.variants.find((v: any) => v.id === variantId);
+      
+      await addDoc(collection(db, 'transfers'), {
+        fromBranchId,
+        toBranchId,
+        productId,
+        variantId,
+        productName: product?.name || 'Unknown',
+        variantName: variant?.name || 'Unknown',
+        sns,
+        status: 'completed',
+        requestedBy: auth.currentUser?.uid,
+        timestamp: serverTimestamp()
+      });
+
+      setShowTransferModal(false);
+      setTransferConfig({ toBranchId: '', productId: '', variantId: '', sns: [] });
+      setPosStatus({ message: "Transfer Stok Berhasil!", type: 'success' });
+      setTimeout(() => setPosStatus({ message: '', type: 'info' }), 3000);
+    } catch (error) {
+       handleFirestoreError(error, OperationType.WRITE, 'transfers');
+    }
+  };
+
+  const handleDisposal = async () => {
+    const { productId, variantId, sns, reason } = disposalConfig;
+    const branchId = userData?.branchId;
+    if (!branchId || !productId || !variantId || sns.length === 0) return;
+
+    try {
+      const itemRef = doc(db, `branches/${branchId}/inventory`, `${productId}_${variantId}`);
+      const itemSnap = await getDoc(itemRef);
+      if (!itemSnap.exists()) return;
+
+      const currentSns = itemSnap.data().sns || [];
+      const newSns = currentSns.filter((s: string) => !sns.includes(s));
+
+      await updateDoc(itemRef, {
+        sns: newSns,
+        stock: newSns.length,
+        lastUpdated: serverTimestamp()
+      });
+
+      // Record Disposal
+      const product = products.find(p => p.id === productId);
+      const variant = product?.variants.find((v: any) => v.id === variantId);
+
+      await addDoc(collection(db, 'disposals'), {
+        branchId,
+        productId,
+        variantId,
+        productName: product?.name || 'Unknown',
+        variantName: variant?.name || 'Unknown',
+        sns,
+        reason,
+        reportedBy: auth.currentUser?.uid,
+        timestamp: serverTimestamp()
+      });
+
+      setShowDisposalModal(false);
+      setViewState({ ...viewState, product: null, variant: null });
+      setPosStatus({ message: `Laporan ${reason === 'broken' ? 'Kerusakan' : 'Retur'} Disimpan!`, type: 'success' });
+      setTimeout(() => setPosStatus({ message: '', type: 'info' }), 3000);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'disposals');
+    }
+  };
+
+  const [viewState, setViewState] = useState<{
+    category: string | null,
+    provider: string | null,
+    product: any | null,
+    variant: any | null
+  }>({ category: 'voucher', provider: null, product: null, variant: null });
+
+  const goBack = () => {
+    if (viewState.variant) setViewState({ ...viewState, variant: null });
+    else if (viewState.product) setViewState({ ...viewState, product: null });
+    else if (viewState.provider) setViewState({ ...viewState, provider: null });
+  };
+
+  const filteredProductsByProvider = React.useMemo(() => {
+    const raw = products.filter(p => 
+      p.category === viewState.category && p.provider === viewState.provider
+    );
+    
+    const groups: Record<string, any> = {};
+    raw.forEach(p => {
+      const key = p.name.toLowerCase().trim();
+      if (!groups[key]) {
+        groups[key] = { ...p, variants: [...(p.variants || [])] };
+      } else {
+        // Merge variants for display if they aren't already grouped in DB
+        const existingIds = new Set(groups[key].variants.map((v: any) => v.id));
+        p.variants?.forEach((v: any) => {
+          if (!existingIds.has(v.id)) {
+            groups[key].variants.push(v);
+            existingIds.add(v.id);
+          }
+        });
+      }
+    });
+    return Object.values(groups);
+  }, [products, viewState.category, viewState.provider]);
+
+  const availableProviders = Array.from(new Set(
+    products.filter(p => p.category === viewState.category).map(p => p.provider)
+  )) as string[];
+
+  const cleanupDuplicates = async () => {
+    const groups: Record<string, any[]> = {};
+    
+    products.forEach(p => {
+      const key = `${p.name.toLowerCase().trim()}-${p.provider}-${p.category}`;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(p);
+    });
+
+    const duplicates = Object.entries(groups).filter(([_, g]) => g.length > 1);
+    
+    if (duplicates.length === 0) {
+      setConfirmModal({
+        show: true,
+        title: "Katalog Bersih",
+        message: "Tidak ditemukan produk duplikat yang perlu digabungkan.",
+        onConfirm: () => setConfirmModal(prev => ({ ...prev, show: false }))
+      });
+      return;
+    }
+
+    setConfirmModal({
+      show: true,
+      title: "Gabungkan Duplikat",
+      message: `Ditemukan ${duplicates.length} kelompok produk yang memiliki duplikat. Gabungkan semua varian ke dalam satu kelompok dan bersihkan katalog?`,
+      onConfirm: async () => {
+        try {
+          for (const [_, group] of duplicates) {
+            const [main, ...others] = group;
+            let mergedVariants = [...(main.variants || [])];
+            
+            for (const other of others) {
+              if (other.variants) {
+                other.variants.forEach((ov: any) => {
+                  if (!mergedVariants.find(mv => mv.id === ov.id)) {
+                    mergedVariants.push(ov);
+                  }
+                });
+              }
+              await deleteDoc(doc(db, 'products', other.id));
+            }
+            await updateDoc(doc(db, 'products', main.id), { variants: mergedVariants });
+          }
+          setConfirmModal(prev => ({ ...prev, show: false }));
+        } catch (error) {
+          console.error("Error merging:", error);
+        }
+      }
+    });
+  };
+
+  const renderContent = () => {
+    if (!userData?.isApproved && userData?.role !== 'admin') {
+      return (
+        <div className="flex flex-col items-center justify-center mt-20 space-y-6 text-center px-6">
+          <div className="w-20 h-20 bg-yellow-500/20 rounded-full flex items-center justify-center text-yellow-500">
+            <ShieldAlert size={40} />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-2xl font-bold">Menunggu Persetujuan</h2>
+            <p className="text-text-dim text-sm">Akun Anda sedang ditinjau oleh Owner. Silakan hubungi admin untuk mendapatkan akses ke sistem Alpatpulsa.</p>
+          </div>
+          <button onClick={() => auth.signOut()} className="text-accent-blue text-sm font-bold">Keluar</button>
+        </div>
+      );
+    }
+
+    switch (activeMenu) {
+      case 'dashboard':
+        return (
+          <div className="space-y-6">
+             <div className="flex justify-between items-center">
+              <h2 className="text-xl font-semibold text-text-dim">Dashboard</h2>
+              {userData?.role === 'admin' ? (
+                <select 
+                  className="bg-gray-800 text-xs border border-glass-border p-2 rounded-lg focus:outline-none"
+                  value={selectedBranch || ''}
+                  onChange={e => setSelectedBranch(e.target.value)}
+                >
+                  {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              ) : (
+                <div className="text-[10px] bg-accent-blue/10 text-accent-blue px-3 py-1 rounded-full border border-accent-blue/20 font-bold uppercase tracking-widest">
+                  {branches.find(b => b.id === selectedBranch)?.name || 'Cabang'}
+                </div>
+              )}
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="glass-card p-4">
+                <p className="text-text-dim text-[10px] uppercase tracking-wider">Katalog Produk</p>
+                <div className="flex items-center justify-between">
+                  <p className="text-2xl font-bold mt-1 tracking-tight">{filteredProductsByProvider.length}</p>
+                  {userData?.role === 'admin' && (
+                    <button 
+                      onClick={cleanupDuplicates} 
+                      title="Gabungkan Duplikat"
+                      className="p-2 bg-amber-500/10 text-amber-500 rounded-lg hover:bg-amber-500/20 transition flex items-center gap-1"
+                    >
+                      <Sparkles size={14} />
+                      <span className="text-[8px] font-bold">MERGE</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="glass-card p-4">
+                <p className="text-text-dim text-[10px] uppercase tracking-wider">Stok di Cabang</p>
+                <p className="text-2xl font-bold mt-1 tracking-tight">
+                  {Object.values(branchInventory).reduce((acc: number, curr: any) => acc + (curr.stock || 0), 0)}
+                </p>
+              </div>
+              <div className="glass-card p-4">
+                <p className="text-text-dim text-[10px] uppercase tracking-wider">Jumlah Cabang</p>
+                <p className="text-2xl font-bold mt-1 tracking-tight">{branches.length}</p>
+              </div>
+              <div className="glass-card p-4">
+                <p className="text-text-dim text-[10px] uppercase tracking-wider">Total Karyawan</p>
+                <p className="text-2xl font-bold mt-1 tracking-tight">{allUsers.length || userData?.role === 'admin' ? allUsers.length : '1'}</p>
+              </div>
+            </div>
+          </div>
+        );
+      case 'system':
+        return (
+          <div className="space-y-8">
+            <section className="space-y-4">
+              <div className="flex justify-between items-center">
+                <h2 className="text-xl font-semibold text-text-dim">Kelola Cabang</h2>
+                {userData?.role === 'admin' && (
+                  <button onClick={() => setShowAddBranch(true)} className="bg-accent-blue text-gray-900 p-2 rounded-full shadow-lg shadow-accent-blue/20">
+                    <Plus size={20} />
+                  </button>
+                )}
+              </div>
+
+              {showAddBranch && (
+                <div className="glass-card p-6 space-y-4 border-accent-blue/30 animate-in fade-in slide-in-from-top-4 duration-300">
+                  <h3 className="text-sm font-bold text-accent-blue">Tambah Cabang Baru</h3>
+                  <div className="space-y-3">
+                    <input placeholder="Nama Cabang" className="w-full bg-white/5 border border-glass-border p-3 rounded-xl focus:outline-none focus:border-accent-blue" value={newBranch.name} onChange={e => setNewBranch({...newBranch, name: e.target.value})} />
+                    <input placeholder="Lokasi / Alamat" className="w-full bg-white/5 border border-glass-border p-3 rounded-xl focus:outline-none focus:border-accent-blue" value={newBranch.location} onChange={e => setNewBranch({...newBranch, location: e.target.value})} />
+                  </div>
+                  <div className="flex gap-3">
+                    <button onClick={handleAddBranch} className="flex-1 bg-accent-blue text-gray-900 py-3 rounded-xl font-bold">Simpan</button>
+                    <button onClick={() => setShowAddBranch(false)} className="px-6 py-3 border border-glass-border rounded-xl">Batal</button>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-3">
+                {branches.map(b => (
+                  <div key={b.id} className="glass-card p-4 flex items-center gap-4 hover:border-white/20 transition-colors">
+                    <div className="w-10 h-10 bg-accent-blue/10 rounded-xl flex items-center justify-center text-accent-blue">
+                      <MapPin size={20} />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="font-bold text-sm tracking-tight">{b.name}</h3>
+                      <p className="text-[10px] text-text-dim leading-tight">{b.location}</p>
+                    </div>
+                    {userData?.role === 'admin' && (
+                      <div className="text-[10px] bg-white/5 px-2 py-1 rounded-lg border border-white/10">
+                        {allUsers.filter(u => u.branchId === b.id).length} Pegawai
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {userData?.role === 'admin' && (
+              <section className="space-y-4 pt-4 border-t border-white/5">
+                <h2 className="text-xl font-semibold text-text-dim flex items-center gap-2">
+                  <UserCheck size={20} className="text-accent-blue" /> Izin Akses Pegawai
+                </h2>
+                
+                {/* Pending Approvals */}
+                {allUsers.some(u => !u.isApproved) ? (
+                  <div className="space-y-3">
+                    <h3 className="text-[10px] font-bold text-yellow-500 uppercase tracking-widest px-1">Menunggu Persetujuan</h3>
+                    {allUsers.filter(u => !u.isApproved).map(u => (
+                      <div key={u.id} className="glass-card p-4 space-y-4 border-yellow-500/30">
+                        <div className="flex justify-between items-center">
+                          <div>
+                            <p className="font-bold text-sm">{u.name}</p>
+                            <p className="text-[10px] text-text-dim">{u.email}</p>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <select 
+                            id={`branch-select-${u.id}`}
+                            className="flex-1 bg-gray-800 border border-glass-border text-xs p-2 rounded-lg focus:outline-none"
+                          >
+                            <option value="">Pilih Penempatan Cabang</option>
+                            {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                          </select>
+                          <button 
+                            onClick={() => {
+                              const bId = (document.getElementById(`branch-select-${u.id}`) as HTMLSelectElement).value;
+                              if (bId) approveUser(u.id, bId);
+                            }}
+                            className="bg-accent-blue text-gray-900 text-xs px-4 py-2 rounded-lg font-bold hover:scale-105 transition"
+                          >
+                            Setujui
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-4 bg-white/5 rounded-xl text-center text-[10px] text-text-dim italic">
+                    Semasuk antrian pegawai sudah terproses.
+                  </div>
+                )}
+
+                {/* Approved Employees Settings */}
+                <div className="space-y-3 mt-6">
+                  <h3 className="text-[10px] font-bold text-text-dim uppercase tracking-widest px-1">Daftar Pegawai Aktif</h3>
+                  {allUsers.filter(u => u.isApproved && u.role !== 'admin').map(u => (
+                    <div key={u.id} className="glass-card p-3 flex items-center justify-between border-white/5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-[8px] font-bold border border-white/10 uppercase">
+                          {u.name[0]}
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold">{u.name}</p>
+                          <p className="text-[8px] text-accent-blue font-medium uppercase tracking-tighter">
+                            {branches.find(b => b.id === u.branchId)?.name || 'Pindah Cabang?'}
+                          </p>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => {
+                          const newBId = prompt("ID Cabang baru (atau biarkan kosong):");
+                          if (newBId !== null) updateDoc(doc(db, 'users', u.id), { branchId: newBId });
+                        }}
+                        className="p-2 text-text-dim hover:text-white"
+                      >
+                        <Settings size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            <section className="pt-8 text-center space-y-4">
+              <button 
+                onClick={() => auth.signOut()}
+                className="w-full py-4 border border-red-500/30 text-red-500 rounded-2xl font-bold text-sm bg-red-500/5 hover:bg-red-500/10 transition"
+              >
+                Keluar dari Sistem
+              </button>
+              <p className="text-[8px] text-text-dim uppercase tracking-widest">Alpatpulsa System v1.0.2</p>
+            </section>
+          </div>
+        );
+      case 'products':
+        return (
+          <div className="space-y-6 pb-20">
+            <div className="flex items-center gap-4">
+              {(viewState.provider || viewState.product) && (
+                <button onClick={goBack} className="p-2 bg-white/5 rounded-lg border border-white/10 text-text-dim">
+                  <ChevronRight size={20} className="rotate-180" />
+                </button>
+              )}
+              <h2 className="text-xl font-semibold text-text-dim">
+                {viewState.product ? 'Detail Produk' : (viewState.provider ? (viewState.category === 'aksesoris' ? `Merek ${viewState.provider}` : `Paket ${viewState.provider}`) : 'Katalog Stok')}
+              </h2>
+              {userData?.role === 'admin' && !viewState.product && (
+                <div className="ml-auto flex gap-2">
+                  {!viewState.provider && (
+                    <button 
+                      onClick={cleanupDuplicates} 
+                      className="p-2 bg-white/5 border border-white/10 rounded-full text-text-dim hover:text-white transition-all"
+                      title="Bersihkan Produk Duplikat"
+                    >
+                      <Sparkles size={18} />
+                    </button>
+                  )}
+                  <button onClick={() => setShowAddProduct(true)} className="bg-accent-blue text-gray-900 p-2 rounded-full shadow-lg">
+                    <Plus size={20} />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {showAddProduct && (
+              <div className="glass-card p-4 space-y-5 border-accent-blue/40 animate-in fade-in slide-in-from-top-4">
+                <div className="text-center pb-2 border-b border-glass-border">
+                  <h3 className="text-sm font-black text-accent-blue tracking-widest uppercase">Form Registrasi Master</h3>
+                  <p className="text-[10px] text-text-dim mt-1">Lengkapi data untuk mendaftarkan SKU baru</p>
+                </div>
+                
+                {/* CATEGORY SELECTOR */}
+                <div className="flex bg-black/40 p-1 rounded-xl">
+                  {['aksesoris', 'voucher', 'perdana'].map(c => (
+                    <button 
+                      key={c}
+                      className={`flex-1 py-3 text-[10px] font-bold uppercase rounded-lg transition-all ${newProduct.category === c ? 'bg-accent-blue text-black shadow-lg shadow-accent-blue/20' : 'text-text-dim hover:text-white'}`}
+                      onClick={() => setNewProduct({...newProduct, category: c, name: '', sn: '', qty: 1})}
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="space-y-4">
+                  {newProduct.category === 'aksesoris' ? (
+                    <>
+                      {/* STEP 1: IDENTIFIKASI BASE */}
+                      <div className="bg-white/5 rounded-2xl p-4 border border-white/10 space-y-4">
+                        <div className="flex items-center gap-2 mb-2">
+                           <div className="w-5 h-5 rounded-full bg-accent-blue/20 text-accent-blue flex items-center justify-center text-[10px] font-bold">1</div>
+                           <h4 className="text-[11px] font-bold text-white uppercase tracking-wider">Identitas Asal</h4>
+                        </div>
+                        
+                        <div className="space-y-1">
+                          <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Merek Aksesoris</p>
+                          <select className="w-full bg-gray-900 border border-glass-border p-3 rounded-xl focus:outline-none focus:border-accent-blue/50 text-xs text-white" value={newProduct.provider} onChange={e => setNewProduct({...newProduct, provider: e.target.value})}>
+                            {brandsList.map(p => <option key={p} value={p}>{p}</option>)}
+                          </select>
+                        </div>
+
+                        <div className="space-y-1">
+                          <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Model Barang</p>
+                           <div className="grid grid-cols-1 gap-2">
+                            <select 
+                              className="w-full bg-gray-900 border border-glass-border p-3 rounded-xl focus:outline-none focus:border-accent-blue/50 text-xs text-white"
+                              value={newProduct.name === '' ? '' : (accessoryTypes.includes(newProduct.name) ? newProduct.name : 'Lainnya')}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setNewProduct({...newProduct, name: val === 'Lainnya' ? '' : val});
+                              }}
+                            >
+                              <option value="">-- Pilih Model --</option>
+                              {accessoryTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                              <option value="Lainnya">Lainnya (Ketik Manual)</option>
+                            </select>
+                            {(newProduct.name === '' || (!accessoryTypes.includes(newProduct.name) && newProduct.name !== '')) && (
+                              <input 
+                                placeholder="Ketik model secara manual..." 
+                                className="w-full bg-black/40 border border-accent-blue/30 p-3 rounded-xl focus:outline-none focus:border-accent-blue text-xs text-white" 
+                                value={newProduct.name} 
+                                onChange={e => setNewProduct({...newProduct, name: e.target.value})} 
+                              />
+                            )}
+                           </div>
+                        </div>
+                      </div>
+
+                      {/* STEP 2: SPESIFIKASI */}
+                      <div className="bg-white/5 rounded-2xl p-4 border border-white/10 space-y-4">
+                        <div className="flex items-center gap-2 mb-2">
+                           <div className="w-5 h-5 rounded-full bg-accent-blue/20 text-accent-blue flex items-center justify-center text-[10px] font-bold">2</div>
+                           <h4 className="text-[11px] font-bold text-white uppercase tracking-wider">Spesifikasi Detail</h4>
+                        </div>
+
+                        <div className="space-y-1">
+                          <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Type / Varian</p>
+                          <input 
+                            placeholder="Contoh: Type-C 3A, RT-100"
+                            className="w-full bg-transparent border-b-2 border-glass-border p-2 text-sm font-bold text-white focus:outline-none focus:border-accent-blue transition-colors" 
+                            value={newProduct.variant.description} 
+                            onChange={e => setNewProduct({...newProduct, variant: { ...newProduct.variant, description: e.target.value }})} 
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4 pt-2">
+                          <div className="space-y-1">
+                            <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Harga Beli</p>
+                            <input 
+                              type="number" placeholder="0" 
+                              className="w-full bg-black/40 border border-glass-border p-3 rounded-xl text-xs text-white focus:outline-none focus:border-accent-blue" 
+                              value={newProduct.variant.modalPrice === 0 ? '' : newProduct.variant.modalPrice}
+                              onChange={e => {
+                                const val = e.target.value === '' ? 0 : Number(e.target.value);
+                                if (!isNaN(val)) setNewProduct({...newProduct, variant: { ...newProduct.variant, modalPrice: val }});
+                              }} 
+                            />
+                            <p className="text-[9px] text-accent-blue font-bold mt-1 px-1">{formatRupiah(newProduct.variant.modalPrice || 0)}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Harga Jual</p>
+                            <input 
+                              type="number" placeholder="0" 
+                              className="w-full bg-black/40 border border-glass-border p-3 rounded-xl text-xs text-green-400 font-bold focus:outline-none focus:border-green-500" 
+                              value={newProduct.variant.sellingPrice === 0 ? '' : newProduct.variant.sellingPrice}
+                              onChange={e => {
+                                const val = e.target.value === '' ? 0 : Number(e.target.value);
+                                if (!isNaN(val)) setNewProduct({...newProduct, variant: { ...newProduct.variant, sellingPrice: val }});
+                              }} 
+                            />
+                            <p className="text-[9px] text-green-400 font-bold mt-1 px-1">{formatRupiah(newProduct.variant.sellingPrice || 0)}</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* STEP 3: STOK AWAL */}
+                      <div className="bg-accent-blue/5 rounded-2xl p-4 border border-accent-blue/30 space-y-4">
+                        <div className="flex items-center gap-2 mb-2">
+                           <div className="w-5 h-5 rounded-full bg-accent-blue text-gray-900 flex items-center justify-center text-[10px] font-bold">3</div>
+                           <h4 className="text-[11px] font-bold text-accent-blue uppercase tracking-wider">Registrasi Stok Barcode</h4>
+                        </div>
+
+                        <div className="grid grid-cols-5 gap-3">
+                            <div className="space-y-1 col-span-3">
+                              <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Barcode Scanner</p>
+                              <div className="flex gap-2">
+                                  <input 
+                                  placeholder="Scan SN..." 
+                                  className="w-full bg-black/50 border border-accent-blue/30 p-3 rounded-xl text-xs font-mono text-white focus:outline-none focus:border-accent-blue" 
+                                  value={newProduct.sn} 
+                                  onChange={e => setNewProduct({...newProduct, sn: e.target.value})} 
+                                  />
+                                  <button onClick={() => setShowCameraScanner('stock-initial')} className="aspect-square bg-accent-blue/20 rounded-xl text-accent-blue border border-accent-blue/30 flex items-center justify-center p-3 hover:bg-accent-blue hover:text-black transition-colors">
+                                      <Camera size={16} />
+                                  </button>
+                              </div>
+                            </div>
+                            <div className="space-y-1 col-span-2">
+                              <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Jml Pcs (Stok)</p>
+                              <input 
+                                type="number" min="1"
+                                className="w-full bg-black/50 border border-accent-blue/30 p-3 rounded-xl text-xs text-white focus:outline-none focus:border-accent-blue text-center font-bold" 
+                                value={newProduct.qty} 
+                                onChange={e => setNewProduct({...newProduct, qty: Number(e.target.value)})} 
+                              />
+                            </div>
+                        </div>
+                        <p className="text-[9px] text-text-dim italic leading-relaxed bg-black/20 p-2 rounded-lg">*Sistem akan merekam 1 Barcode ini dengan kuantitas yang Anda tetapkan.</p>
+                      </div>
+                    </>
+                  ) : (
+                    // VOUCHER / PERDANA FORM
+                    <>
+                      {/* STEP 1: IDENTIFIKASI BASE */}
+                      <div className="bg-white/5 rounded-2xl p-4 border border-white/10 space-y-4">
+                        <div className="flex items-center gap-2 mb-2">
+                           <div className="w-5 h-5 rounded-full bg-accent-blue/20 text-accent-blue flex items-center justify-center text-[10px] font-bold">1</div>
+                           <h4 className="text-[11px] font-bold text-white uppercase tracking-wider">Identitas Jaringan</h4>
+                        </div>
+
+                        <div className="space-y-1">
+                          <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Provider</p>
+                          <select className="w-full bg-gray-900 border border-glass-border p-3 rounded-xl focus:outline-none focus:border-accent-blue/50 text-xs text-white" value={newProduct.provider} onChange={e => setNewProduct({...newProduct, provider: e.target.value})}>
+                            {providersList.map(p => <option key={p} value={p}>{p}</option>)}
+                          </select>
+                        </div>
+
+                        <div className="space-y-1">
+                          <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Jenis {newProduct.category === 'voucher' ? 'Voucher' : 'Perdana'}</p>
+                           <div className="grid grid-cols-1 gap-2">
+                            <select 
+                              className="w-full bg-gray-900 border border-glass-border p-3 rounded-xl focus:outline-none focus:border-accent-blue/50 text-xs text-white"
+                              value={newProduct.name === '' ? '' : ( 
+                                (newProduct.category === 'voucher' && voucherTypes.includes(newProduct.name)) ||
+                                (newProduct.category === 'perdana' && perdanaTypes.includes(newProduct.name)) ? newProduct.name : 'Lainnya' 
+                              )}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setNewProduct({...newProduct, name: val === 'Lainnya' ? '' : val});
+                              }}
+                            >
+                              <option value="">-- Pilih Jenis --</option>
+                              {newProduct.category === 'voucher' && voucherTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                              {newProduct.category === 'perdana' && perdanaTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                              <option value="Lainnya">Lainnya (Ketik Sengdiri)</option>
+                            </select>
+                            {(newProduct.name === '' || (
+                              newProduct.category === 'voucher' && !voucherTypes.includes(newProduct.name) && newProduct.name !== ''
+                            ) || (
+                              newProduct.category === 'perdana' && !perdanaTypes.includes(newProduct.name) && newProduct.name !== ''
+                            )) && (
+                              <input 
+                                placeholder="Ketik jenis manual..." 
+                                className="w-full bg-black/40 border border-accent-blue/30 p-3 rounded-xl focus:outline-none focus:border-accent-blue text-xs text-white" 
+                                value={newProduct.name} 
+                                onChange={e => setNewProduct({...newProduct, name: e.target.value})} 
+                              />
+                            )}
+                           </div>
+                        </div>
+                      </div>
+
+                      {/* STEP 2: SPESIFIKASI */}
+                      <div className="bg-white/5 rounded-2xl p-4 border border-white/10 space-y-4">
+                        <div className="flex items-center gap-2 mb-2">
+                           <div className="w-5 h-5 rounded-full bg-accent-blue/20 text-accent-blue flex items-center justify-center text-[10px] font-bold">2</div>
+                           <h4 className="text-[11px] font-bold text-white uppercase tracking-wider">Kuota & Harga</h4>
+                        </div>
+                        
+                        <div className="space-y-1">
+                          <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Isi Kuota / Rincian</p>
+                          <input 
+                            placeholder="Contoh: 5GB 30 Hari Full"
+                            className="w-full bg-transparent border-b-2 border-glass-border p-2 text-sm font-bold text-white focus:outline-none focus:border-accent-blue transition-colors" 
+                            value={newProduct.variant.description} 
+                            onChange={e => setNewProduct({...newProduct, variant: { ...newProduct.variant, description: e.target.value }})} 
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4 pt-2">
+                          <div className="space-y-1">
+                            <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Harga Modal</p>
+                            <input 
+                              type="number" placeholder="0" 
+                              className="w-full bg-black/40 border border-glass-border p-3 rounded-xl text-xs text-white focus:outline-none focus:border-accent-blue" 
+                              value={newProduct.variant.modalPrice === 0 ? '' : newProduct.variant.modalPrice}
+                              onChange={e => {
+                                const val = e.target.value === '' ? 0 : Number(e.target.value);
+                                if (!isNaN(val)) setNewProduct({...newProduct, variant: { ...newProduct.variant, modalPrice: val }});
+                              }} 
+                            />
+                            <p className="text-[9px] text-accent-blue font-bold mt-1 px-1">{formatRupiah(newProduct.variant.modalPrice || 0)}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Harga Jual</p>
+                            <input 
+                              type="number" placeholder="0" 
+                              className="w-full bg-black/40 border border-glass-border p-3 rounded-xl text-xs text-green-400 font-bold focus:outline-none focus:border-green-500" 
+                              value={newProduct.variant.sellingPrice === 0 ? '' : newProduct.variant.sellingPrice}
+                              onChange={e => {
+                                const val = e.target.value === '' ? 0 : Number(e.target.value);
+                                if (!isNaN(val)) setNewProduct({...newProduct, variant: { ...newProduct.variant, sellingPrice: val }});
+                              }} 
+                            />
+                            <p className="text-[9px] text-green-400 font-bold mt-1 px-1">{formatRupiah(newProduct.variant.sellingPrice || 0)}</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* STEP 3: STOK AWAL */}
+                      <div className="bg-accent-blue/5 rounded-2xl p-4 border border-accent-blue/30 space-y-4">
+                        <div className="flex items-center gap-2 mb-2">
+                           <div className="w-5 h-5 rounded-full bg-accent-blue text-gray-900 flex items-center justify-center text-[10px] font-bold">3</div>
+                           <h4 className="text-[11px] font-bold text-accent-blue uppercase tracking-wider">Scan SN Fisik Pertama (Opsional)</h4>
+                        </div>
+
+                        <div className="space-y-1">
+                          <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Unik Serial Number</p>
+                          <div className="flex gap-2">
+                              <input 
+                              placeholder="Scan 1 fisik voucher/perdana" 
+                              className="w-full bg-black/50 border border-accent-blue/30 p-3 rounded-xl text-xs font-mono text-white focus:outline-none focus:border-accent-blue" 
+                              value={newProduct.sn} 
+                              onChange={e => setNewProduct({...newProduct, sn: e.target.value, qty: 1})} 
+                              />
+                              <button onClick={() => setShowCameraScanner('stock-initial')} className="aspect-square bg-accent-blue/20 rounded-xl text-accent-blue border border-accent-blue/30 flex items-center justify-center p-3 hover:bg-accent-blue hover:text-black transition-colors">
+                                  <Camera size={16} />
+                              </button>
+                          </div>
+                        </div>
+                        <div className="bg-black/20 p-2 rounded-lg px-3">
+                           <p className="text-[8px] text-text-dim italic leading-relaxed mb-1">Hanya melayani scan otomatis 1 SN pada tahap ini agar aman ke database.</p>
+                           <p className="text-[8px] text-text-dim italic leading-relaxed">Punya Tumpukan Ratusan SN Fisik? <b>Simpan data ini dulu, lalu menuju 'Katalog Stok' & Scan masal disana!</b></p>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <div className="flex gap-3 pt-6 border-t border-glass-border">
+                  <button onClick={() => setShowAddProduct(false)} className="px-6 py-4 bg-white/5 border border-glass-border rounded-xl font-bold uppercase tracking-widest text-[10px] hover:bg-white/10 transition-colors">Batal</button>
+                  <button onClick={handleSaveProduct} className="flex-1 bg-accent-blue text-gray-900 py-4 rounded-xl font-black uppercase tracking-widest text-[10px] shadow-lg shadow-accent-blue/20 hover:bg-white transition-colors">Simpan Data SKU</button>
+                </div>
+              </div>
+            )}
+
+            {/* View Layer 1: Categories */}
+            {!viewState.provider && !viewState.product && (
+              <div className="space-y-4">
+                <div className="flex gap-2 overflow-x-auto pb-4 scrollbar-hide">
+                  {['voucher', 'perdana', 'aksesoris'].map(cat => (
+                    <button 
+                      key={cat} 
+                      onClick={() => setViewState({ ...viewState, category: cat })}
+                      className={`px-6 py-3 rounded-2xl text-xs font-bold uppercase tracking-widest transition-all ${viewState.category === cat ? 'bg-accent-blue text-gray-900' : 'bg-white/5 border border-glass-border text-text-dim'}`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+                      <div className="space-y-3">
+                        <h3 className="text-[10px] font-bold text-text-dim uppercase tracking-[0.2em] px-1">
+                          {viewState.category === 'aksesoris' ? 'Pilih Merek' : 'Pilih Provider'}
+                        </h3>
+                        {availableProviders.map((p: string, pIdx: number) => {
+                          const colors = getProviderColor(p);
+                          return (
+                            <button 
+                              key={`${p}-${pIdx}`} 
+                              onClick={() => setViewState({ ...viewState, provider: p })}
+                              className={`glass-card p-5 flex justify-between items-center group active:scale-[0.98] transition border ${colors.split(' ').slice(2).join(' ')}`}
+                            >
+                        <div className="flex items-center gap-4">
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${colors.split(' ').slice(0, 2).join(' ')} group-hover:bg-white/20`}>
+                            <Package size={20} />
+                          </div>
+                          <span className="font-bold tracking-tight uppercase">{p}</span>
+                        </div>
+                        <ChevronRight size={16} className="text-text-dim group-hover:text-white transition" />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* View Layer 2: Variant List per Provider */}
+            {viewState.provider && !viewState.product && (
+              <div className="space-y-4">
+                <div className="relative">
+                  <input 
+                    placeholder={`Cari paket ${viewState.provider}...`} 
+                    className="w-full bg-white/5 border border-glass-border p-4 pl-12 rounded-2xl text-sm focus:outline-none focus:border-accent-blue transition"
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                  />
+                  <Package className="absolute left-4 top-4.5 text-text-dim" size={18} />
+                </div>
+                <div className="space-y-4">
+                  {filteredProductsByProvider.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase())).map(p => (
+                    <div key={p.id} className="glass-card overflow-hidden border-white/5 hover:border-accent-blue/20 transition-all p-3 space-y-3">
+                      <div className="flex justify-between items-center mb-1">
+                        <div className="flex items-center gap-2">
+                           <div className="w-1.5 h-6 bg-accent-blue rounded-full"></div>
+                           <h3 className="text-sm font-black uppercase tracking-tight">{p.name}</h3>
+                        </div>
+                        {userData?.role === 'admin' && (
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); handleDeleteProduct(p.id); }}
+                            className="p-2 bg-red-500/10 text-red-500 rounded-lg"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        )}
+                      </div>
+                      
+                      <div className="grid grid-cols-1 gap-2">
+                        {p.variants && Array.isArray(p.variants) && p.variants.map((v: any, vIdx: number) => {
+                          const invKey = `${p.id}_${v.id || vIdx}`;
+                          const currentInv = branchInventory[invKey] || { stock: 0 };
+                          return (
+                            <button 
+                             key={v.id || `v-${vIdx}`} 
+                             onClick={() => setViewState({ ...viewState, product: p, variant: v })}
+                             className="w-full bg-white/5 p-3 rounded-xl text-left border border-white/5 hover:border-accent-blue/30 transition-all"
+                            >
+                             <div className="flex justify-between items-start">
+                                <span className="text-[11px] font-bold text-text-main line-clamp-1">{v.description || v.name}</span>
+                                <div className="text-right ml-2 shrink-0">
+                                  <span className="text-[10px] text-accent-blue font-black block">Rp {v.sellingPrice?.toLocaleString()}</span>
+                                  <span className={`text-[8px] font-bold uppercase tracking-tighter ${currentInv.stock > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                    {currentInv.stock > 0 ? `Stok: ${currentInv.stock}` : 'Kosong'}
+                                  </span>
+                                </div>
+                             </div>
+                            </button>
+                         );
+                       })}
+                      </div>
+                      {userData?.role === 'admin' && (
+                        <button 
+                          onClick={() => {
+                            setNewProduct({
+                              ...newProduct,
+                              targetProductId: p.id,
+                              name: p.name,
+                              provider: p.provider,
+                              category: p.category,
+                              variant: { ...newProduct.variant, id: Math.random().toString(36).substr(2, 9) }
+                            });
+                            setShowAddProduct(true);
+                          }}
+                          className="w-full py-2 border border-dashed border-accent-blue/30 rounded-xl text-[9px] font-bold uppercase text-accent-blue hover:bg-accent-blue/5 transition"
+                        >
+                          + Tambah Tipe / Model Baru
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* View Layer 3: Detail & SN Management (Bottom Style) */}
+            {viewState.product && viewState.variant && (
+              <div className="fixed inset-0 z-[60] flex items-end">
+                <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setViewState({ ...viewState, product: null, variant: null })}></div>
+                <div className="relative w-full glass-card rounded-t-[40px] p-8 border-t border-white/10 animate-in slide-in-from-bottom duration-500 max-h-[85vh] overflow-y-auto">
+                  <div className="w-12 h-1 bg-white/20 rounded-full mx-auto mb-8"></div>
+                  
+                  <div className="space-y-6">
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3">
+                          <h4 className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded border ${getProviderColor(viewState.provider)}`}>
+                            {viewState.provider}
+                          </h4>
+                          <span className="text-[10px] text-text-dim uppercase tracking-widest">{viewState.product.category}</span>
+                        </div>
+                        <h3 className="text-xl font-bold mt-2">{viewState.variant.name}</h3>
+                        {viewState.product.category === 'aksesoris' && viewState.variant.description && (
+                           <p className="text-accent-blue text-[10px] font-bold mt-1 bg-accent-blue/5 px-2 py-1 rounded-lg inline-block border border-accent-blue/10">
+                             {viewState.variant.description}
+                           </p>
+                        )}
+                        {viewState.product.category !== 'aksesoris' && viewState.variant.description && (
+                          <p className="text-text-dim text-xs italic mt-1">{viewState.variant.description}</p>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        {userData?.role === 'admin' && (
+                          <button 
+                            onClick={() => deleteVariant(viewState.product.id, viewState.variant.id)}
+                            className="bg-red-500/10 text-red-500 p-3 rounded-2xl border border-red-500/20 hover:bg-red-500 hover:text-white transition"
+                          >
+                            <Trash2 size={24} />
+                          </button>
+                        )}
+                        <div className="bg-accent-blue/10 p-3 rounded-2xl border border-accent-blue/20">
+                          <Package size={24} className="text-accent-blue" />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
+                        <p className="text-[8px] text-text-dim uppercase tracking-widest">Harga Jual</p>
+                        <p className="text-lg font-bold">Rp {viewState.variant.sellingPrice?.toLocaleString()}</p>
+                      </div>
+                      <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
+                        <p className="text-[8px] text-text-dim uppercase tracking-widest">Stok Saat Ini</p>
+                        <p className="text-lg font-bold">{branchInventory[`${viewState.product.id}_${viewState.variant.id}`]?.stock || 0}</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      {userData?.role === 'audit' && (
+                        <div className="flex justify-between items-center">
+                          <h5 className="text-xs font-bold uppercase tracking-widest flex items-center gap-2">
+                            <Hash size={14} className="text-accent-blue" />
+                            {viewState.product.category === 'aksesoris' ? 'Daftar SN / Unit' : 'Daftar SN Terdaftar'}
+                          </h5>
+                          <div className="flex gap-2">
+                            <div className={`flex rounded-xl p-1 bg-white/5 border border-white/10 ${showBatchSN || showRangeSN ? 'bg-accent-blue/5' : ''}`}>
+                              <button 
+                                onClick={() => { setShowBatchSN(false); setShowRangeSN(false); }}
+                                className={`text-[9px] px-3 py-2 rounded-lg font-bold uppercase tracking-wider transition-all ${!showBatchSN && !showRangeSN ? 'bg-accent-blue text-gray-900 shadow-lg' : 'text-text-dim'}`}
+                              >
+                                Single
+                              </button>
+                              {viewState.product.category === 'aksesoris' ? (
+                                <button 
+                                  onClick={() => { setShowBatchSN(true); setShowRangeSN(false); }}
+                                  className={`text-[9px] px-3 py-2 rounded-lg font-bold uppercase tracking-wider transition-all ${showBatchSN ? 'bg-accent-blue text-gray-900 shadow-lg' : 'text-text-dim'}`}
+                                >
+                                  Batch
+                                </button>
+                              ) : (
+                                <button 
+                                  onClick={() => { setShowRangeSN(true); setShowBatchSN(false); }}
+                                  className={`text-[9px] px-3 py-2 rounded-lg font-bold uppercase tracking-wider transition-all ${showRangeSN ? 'bg-accent-blue text-gray-900 shadow-lg' : 'text-text-dim'}`}
+                                >
+                                  Range/Masal
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {userData?.role === 'audit' && !showBatchSN && !showRangeSN && (
+                        <div className="p-4 bg-white/5 rounded-2xl border border-accent-blue/30 space-y-3 animate-in fade-in slide-in-from-top-2">
+                          <div className="flex justify-between items-center px-1">
+                            <p className="text-[10px] font-bold text-accent-blue uppercase tracking-widest">Scan / Input SN Unik</p>
+                            <span className="text-[8px] text-text-dim italic">Gunakan Scanner Bluetooth (Keyboard Mode)</span>
+                          </div>
+                          <div className="flex gap-2">
+                             <input 
+                              placeholder="Fokus di sini & scan QR..."
+                              className="flex-1 bg-black/40 border border-white/10 p-3 rounded-xl text-xs font-mono focus:outline-none focus:border-accent-blue/50"
+                              value={singleSNInput}
+                              onChange={e => setSingleSNInput(e.target.value)}
+                              onKeyDown={async (e) => {
+                                if (e.key === 'Enter' && singleSNInput.trim()) {
+                                  if (!selectedBranch) return;
+                                  const sn = singleSNInput.trim();
+                                  const itemRef = doc(db, `branches/${selectedBranch}/inventory`, `${viewState.product.id}_${viewState.variant.id}`);
+                                  const currentData = branchInventory[`${viewState.product.id}_${viewState.variant.id}`] || { sns: [] };
+                                  
+                                  if (!currentData.sns.includes(sn)) {
+                                    await setDoc(itemRef, {
+                                      productId: viewState.product.id,
+                                      variantId: viewState.variant.id,
+                                      sns: [...currentData.sns, sn],
+                                      stock: (currentData.stock || 0) + 1,
+                                      lastUpdated: serverTimestamp()
+                                    });
+                                  }
+                                  setSingleSNInput('');
+                                }
+                              }}
+                            />
+                            <button 
+                              onClick={() => setShowCameraScanner('stock')}
+                              className="p-3 bg-accent-blue/10 text-accent-blue rounded-xl border border-accent-blue/30"
+                            >
+                              <Camera size={18} />
+                            </button>
+                            <button 
+                              onClick={async () => {
+                                if (!singleSNInput.trim() || !selectedBranch) return;
+                                const sn = singleSNInput.trim();
+                                const itemRef = doc(db, `branches/${selectedBranch}/inventory`, `${viewState.product.id}_${viewState.variant.id}`);
+                                const currentData = branchInventory[`${viewState.product.id}_${viewState.variant.id}`] || { sns: [] };
+                                if (currentData.sns.includes(sn)) return;
+                                await setDoc(itemRef, {
+                                  productId: viewState.product.id,
+                                  variantId: viewState.variant.id,
+                                  sns: [...currentData.sns, sn],
+                                  stock: (currentData.stock || 0) + 1,
+                                  lastUpdated: serverTimestamp()
+                                });
+                                setSingleSNInput('');
+                                const dispName = viewState.product.category === 'aksesoris' ? `${viewState.product.provider} ${viewState.variant.name} ${viewState.product.name}` : `${viewState.product.name} - ${viewState.variant.name}`;
+                                setPosStatus({ message: `📦 Stok Masuk: ${dispName} (SN: ${sn})`, type: 'success' });
+                                setTimeout(() => setPosStatus({ message: '', type: 'info' }), 3000);
+                              }}
+                              className="px-4 bg-accent-blue text-gray-900 rounded-xl font-bold text-xs"
+                            >
+                              Add
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {showRangeSN && (
+                        <div className="p-4 bg-white/5 rounded-2xl border border-accent-blue/30 space-y-4 animate-in fade-in slide-in-from-top-2">
+                          <div className="flex justify-between items-center">
+                             <p className="text-[10px] font-bold text-accent-blue uppercase tracking-widest">Input SN Masal (Berurutan)</p>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 gap-3">
+                             <div className="space-y-1">
+                               <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">SN Awal</p>
+                               <input 
+                                 placeholder="Contoh: ...9270"
+                                 className="w-full bg-black/40 border border-white/10 p-3 rounded-xl text-xs font-mono focus:outline-none focus:border-accent-blue/50"
+                                 value={rangeSNConfig.start}
+                                 onChange={e => setRangeSNConfig({...rangeSNConfig, start: e.target.value})}
+                               />
+                             </div>
+                             <div className="space-y-1">
+                               <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">SN Akhir</p>
+                               <input 
+                                 placeholder="Contoh: ...9280"
+                                 className="w-full bg-black/40 border border-white/10 p-3 rounded-xl text-xs font-mono focus:outline-none focus:border-accent-blue/50"
+                                 value={rangeSNConfig.end}
+                                 onChange={e => setRangeSNConfig({...rangeSNConfig, end: e.target.value})}
+                               />
+                             </div>
+                          </div>
+
+                          {rangeSNConfig.start && rangeSNConfig.end && (() => {
+                            const startMatch = rangeSNConfig.start.match(/^(.*?)(\d+)$/);
+                            const endMatch = rangeSNConfig.end.match(/^(.*?)(\d+)$/);
+                            if (startMatch && endMatch && startMatch[1] === endMatch[1]) {
+                              const s = BigInt(startMatch[2]);
+                              const e = BigInt(endMatch[2]);
+                              const diff = e - s;
+                              if (diff >= 0n && diff < 500n) {
+                                const count = Number(diff) + 1;
+                                return (
+                                  <div className="p-3 bg-accent-blue/10 border border-accent-blue/20 rounded-xl space-y-2">
+                                    <div className="flex justify-between items-center">
+                                      <p className="text-[10px] font-bold text-accent-blue uppercase">📋 Preview SN ({count} Pcs)</p>
+                                      <span className="text-[10px] text-green-400 font-bold">Valid Sequence</span>
+                                    </div>
+                                    <div className="text-[9px] text-text-dim font-mono line-clamp-2 italic bg-black/20 p-2 rounded">
+                                      {rangeSNConfig.start}, ..., {rangeSNConfig.end}
+                                    </div>
+                                    <button 
+                                      onClick={async () => {
+                                        if (!selectedBranch) return;
+                                        const sns = [];
+                                        const padding = startMatch[2].length;
+                                        for (let i = s; i <= e; i++) {
+                                          sns.push(startMatch[1] + i.toString().padStart(padding, '0'));
+                                        }
+
+                                        const itemRef = doc(db, `branches/${selectedBranch}/inventory`, `${viewState.product.id}_${viewState.variant.id}`);
+                                        const currentData = branchInventory[`${viewState.product.id}_${viewState.variant.id}`] || { sns: [] };
+                                        
+                                        // Skip duplicates
+                                        const uniqueNewSns = sns.filter(sn => !currentData.sns.includes(sn));
+                                        if (uniqueNewSns.length === 0) {
+                                          setPosStatus({ message: "Semua SN dalam jangkauan sudah terdaftar!", type: 'error' });
+                                          return;
+                                        }
+
+                                        const finalSns = [...currentData.sns, ...uniqueNewSns];
+                                        await setDoc(itemRef, {
+                                          productId: viewState.product.id,
+                                          variantId: viewState.variant.id,
+                                          sns: finalSns,
+                                          stock: finalSns.length,
+                                          lastUpdated: serverTimestamp()
+                                        });
+
+                                        setRangeSNConfig({ start: '', end: '' });
+                                        setShowRangeSN(false);
+                                        const dispName = viewState.product.category === 'aksesoris' ? `${viewState.product.provider} ${viewState.variant.name} ${viewState.product.name}` : `${viewState.product.name} - ${viewState.variant.name}`;
+                                        setPosStatus({ message: `✅ Berhasil Input ${uniqueNewSns.length} SN Berurutan: ${dispName}`, type: 'success' });
+                                        setTimeout(() => setPosStatus({ message: '', type: 'info' }), 4000);
+                                      }}
+                                      className="w-full py-3 bg-accent-blue text-gray-900 rounded-xl font-bold text-[10px] uppercase tracking-widest shadow-lg shadow-accent-blue/20 hover:bg-white active:scale-95 transition"
+                                    >
+                                      Konfirmasi & Simpan {count} Pcs
+                                    </button>
+                                  </div>
+                                );
+                              }
+                            }
+                            return (
+                              <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
+                                <p className="text-[9px] text-red-400 font-bold italic text-center">Format SN tidak valid atau terlalu besar (max 500 pcs). Pastikan awalan SN sama & berakhiran angka.</p>
+                              </div>
+                            );
+                          })()}
+
+                          <button 
+                            onClick={() => { setShowRangeSN(false); setRangeSNConfig({ start: '', end: '' }); }}
+                            className="w-full py-3 border border-white/10 rounded-xl text-[10px] font-bold uppercase tracking-widest text-text-dim"
+                          >
+                            Batal
+                          </button>
+                        </div>
+                      )}
+
+                      {showBatchSN && (
+                        <div className="p-4 bg-white/5 rounded-2xl border border-accent-blue/30 space-y-4 animate-in fade-in slide-in-from-top-2">
+                          <div className="flex justify-between items-center">
+                             <p className="text-[10px] font-bold text-accent-blue uppercase tracking-widest">Input Batch (1 SN Banyak Pcs)</p>
+                          </div>
+                          
+                          <div className="space-y-3">
+                             <div className="space-y-1">
+                               <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Kode SN / Batch</p>
+                               <input 
+                                 placeholder="Scan atau ketik SN..."
+                                 className="w-full bg-black/40 border border-white/10 p-3 rounded-xl text-xs font-mono focus:outline-none focus:border-accent-blue/50"
+                                 value={batchSNConfig.sn}
+                                 onChange={e => setBatchSNConfig({...batchSNConfig, sn: e.target.value})}
+                               />
+                             </div>
+                             <div className="space-y-1">
+                               <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Jumlah (Pcs)</p>
+                               <input 
+                                 type="number"
+                                 placeholder="Jumlah Pcs"
+                                 className="w-full bg-black/40 border border-white/10 p-3 rounded-xl text-xs focus:outline-none focus:border-accent-blue/50"
+                                 value={batchSNConfig.qty || ''}
+                                 onChange={e => setBatchSNConfig({...batchSNConfig, qty: Math.max(1, Number(e.target.value) || 1)})}
+                               />
+                             </div>
+                          </div>
+
+                          <div className="flex gap-2">
+                            <button 
+                              onClick={() => {
+                                if (!batchSNConfig.sn || !selectedBranch) return;
+                                const itemRef = doc(db, `branches/${selectedBranch}/inventory`, `${viewState.product.id}_${viewState.variant.id}`);
+                                const currentData = branchInventory[`${viewState.product.id}_${viewState.variant.id}`] || { sns: [] };
+                                
+                                // Create array with same SN multiple times to increase stock count
+                                const newSns = [...currentData.sns, ...new Array(batchSNConfig.qty).fill(batchSNConfig.sn)];
+                                
+                                setDoc(itemRef, {
+                                  productId: viewState.product.id,
+                                  variantId: viewState.variant.id,
+                                  sns: newSns,
+                                  stock: newSns.length,
+                                  lastUpdated: serverTimestamp()
+                                });
+                                setBatchSNConfig({ sn: '', qty: 1 });
+                                setShowBatchSN(false);
+                                const dispName = viewState.product.category === 'aksesoris' ? `${viewState.product.provider} ${viewState.variant.name} ${viewState.product.name}` : `${viewState.product.name} - ${viewState.variant.name}`;
+                                setPosStatus({ message: `📦 Batch Masuk: ${batchSNConfig.qty} Pcs ${dispName}`, type: 'success' });
+                                setTimeout(() => setPosStatus({ message: '', type: 'info' }), 4000);
+                              }}
+                              className="flex-1 bg-accent-blue text-gray-900 py-3 rounded-xl font-bold text-[10px] uppercase tracking-widest"
+                            >
+                              Simpan Batch Produk
+                            </button>
+                            <button 
+                              onClick={() => { setShowBatchSN(false); setBatchSNConfig({ sn: '', qty: 1 }); }}
+                              className="px-6 py-3 border border-white/10 rounded-xl text-[10px] font-bold uppercase tracking-widest"
+                            >
+                              Batal
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="space-y-2 max-h-40 overflow-y-auto pr-2 scrollbar-hide">
+                        {(branchInventory[`${viewState.product.id}_${viewState.variant.id}`]?.sns || []).length > 0 ? (
+                          branchInventory[`${viewState.product.id}_${viewState.variant.id}`].sns.map((sn: string, sIdx: number) => (
+                            <div key={`${sn}-${sIdx}`} className="flex justify-between items-center p-3 bg-white/5 rounded-xl border border-white/5 group">
+                              <span className="text-[10px] font-mono tracking-wider">{sn}</span>
+                              <div className="flex items-center gap-2">
+                                {userData?.role === 'employee' && (
+                                  <button 
+                                    onClick={() => {
+                                      setDisposalConfig({ productId: viewState.product.id, variantId: viewState.variant.id, sns: [sn], reason: 'broken' });
+                                      setShowDisposalModal(true);
+                                    }}
+                                    className="p-1.5 bg-red-500/10 text-red-500 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                                    title="Pemusnahan / Retur"
+                                  >
+                                    <RotateCcw size={12} />
+                                  </button>
+                                )}
+                                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="p-4 text-center text-[10px] text-text-dim italic">Belum ada SN yang diinput untuk cabang ini.</div>
+                        )}
+                      </div>
+                    </div>
+
+                    <button 
+                      onClick={() => setViewState({ ...viewState, product: null, variant: null })}
+                      className="w-full py-4 glass-card border-accent-blue/30 text-accent-blue font-bold uppercase tracking-[0.2em] text-[10px] rounded-2xl"
+                    >
+                      Tutup Detail
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      case 'shopping':
+        const handlePOSScan = (e: React.KeyboardEvent<HTMLInputElement>) => {
+          if (e.key === 'Enter' && posScannerInput.trim()) {
+            const sn = posScannerInput.trim();
+            setPosScannerInput('');
+
+            // Search in active branch inventory
+            let found = false;
+            for (const key in branchInventory) {
+              const inv = branchInventory[key];
+              if (inv.sns.includes(sn)) {
+                // Get product details
+                const product = products.find(p => p.id === inv.productId);
+                if (product) {
+                  const variant = product.variants.find((v: any) => v.id === inv.variantId);
+                  if (variant) {
+                    setCart(prev => [...prev, {
+                      sn,
+                      productId: product.id,
+                      variantId: variant.id,
+                      name: product.name,
+                      variantName: variant.name,
+                      price: variant.sellingPrice,
+                      category: product.category,
+                      provider: product.provider
+                    }]);
+                    const displayName = product.category === 'aksesoris' ? `${product.provider} ${variant.name} ${product.name}` : `${product.name} - ${variant.name}`;
+                    setPosStatus({ message: `Scanned: ${displayName}`, type: 'success' });
+                    found = true;
+                    break;
+                  }
+                }
+              }
+            }
+            if (!found) setPosStatus({ message: `SN ${sn} tidak ditemukan di stok cabang ini!`, type: 'error' });
+          }
+        };
+
+        const totalCart = cart.reduce((acc, curr) => acc + curr.price, 0);
+
+        const checkout = async () => {
+          if (cart.length === 0) return;
+          
+          setConfirmModal({
+            show: true,
+            title: "Konfirmasi Penjualan",
+            message: `Selesaikan penjualan ${cart.length} item dengan total ${formatRupiah(totalCart)}? Stok akan otomatis dikurangi.`,
+            onConfirm: async () => {
+              try {
+                // Group by inventory key to update
+                const updates: any = {};
+                cart.forEach(item => {
+                  const key = `${item.productId}_${item.variantId}`;
+                  if (!updates[key]) updates[key] = [];
+                  updates[key].push(item.sn);
+                });
+
+                for (const key in updates) {
+                  const snList = updates[key];
+                  const itemRef = doc(db, `branches/${selectedBranch}/inventory`, key);
+                  const currentData = branchInventory[key];
+                  
+                  // Filter out the sold SNs
+                  const newSns = (currentData?.sns || []).filter((s: string) => !snList.includes(s));
+                  
+                  await updateDoc(itemRef, {
+                    sns: newSns,
+                    stock: newSns.length,
+                    lastUpdated: serverTimestamp()
+                  });
+                }
+
+                // Add to Global Transactions
+                await addDoc(collection(db, 'transactions'), {
+                  branchId: selectedBranch,
+                  branchName: branches.find(b => b.id === selectedBranch)?.name || 'Unknown',
+                  employeeId: auth.currentUser?.uid,
+                  employeeName: userData?.name || 'Staff',
+                  items: cart.map(item => ({
+                    productId: item.productId,
+                    variantId: item.variantId,
+                    sn: item.sn,
+                    name: item.name,
+                    variantName: item.variantName,
+                    price: item.price,
+                    provider: item.provider
+                  })),
+                  totalAmount: totalCart,
+                  timestamp: serverTimestamp()
+                });
+
+                setCart([]);
+                setPosStatus({ message: "Penjualan Berhasil Disimpan!", type: 'success' });
+                setConfirmModal(prev => ({ ...prev, show: false }));
+              } catch (error: any) {
+                handleFirestoreError(error, OperationType.WRITE, `branches/${selectedBranch}/inventory`);
+              }
+            }
+          });
+        };
+
+        return (
+          <div className="space-y-6 pb-20">
+            <div className="flex justify-between items-center">
+               <h2 className="text-xl font-black text-text-dim tracking-tight">KASIR / POS</h2>
+               <div className="text-[10px] bg-accent-blue/10 text-accent-blue px-3 py-1 rounded-full font-bold border border-accent-blue/20 uppercase tracking-widest">
+                  {branches.find(b => b.id === selectedBranch)?.name || 'Cabang'}
+                </div>
+            </div>
+
+            <div className="glass-card p-6 space-y-4 border-accent-blue/30 relative overflow-hidden">
+               <div className="absolute top-0 right-0 p-2 opacity-10">
+                  <QrCode size={80} />
+               </div>
+               <div className="space-y-1 relative z-10">
+                 <p className="text-[10px] font-bold text-accent-blue uppercase tracking-widest">Scan QR / Barcode Produk</p>
+                 <div className="flex gap-2">
+                   <input 
+                    autoFocus
+                    placeholder="Klik di sini & SCAN SN..."
+                    className="flex-1 bg-black/40 border-2 border-accent-blue/50 p-4 rounded-2xl text-lg font-mono placeholder:opacity-30 focus:outline-none focus:border-accent-blue shadow-inner"
+                    value={posScannerInput}
+                    onChange={e => setPosScannerInput(e.target.value)}
+                    onKeyDown={handlePOSScan}
+                   />
+                   <button 
+                    onClick={() => setShowCameraScanner('pos')}
+                    className="aspect-square w-16 bg-accent-blue/20 text-accent-blue rounded-2xl flex items-center justify-center border-2 border-accent-blue/30 shadow-lg shadow-accent-blue/10"
+                   >
+                     <Camera size={32} />
+                   </button>
+                 </div>
+                 <p className="text-[8px] text-text-dim italic mt-2 text-center">Scanner Bluetooth otomatis menekan ENTER setelah scan.</p>
+               </div>
+            </div>
+
+            {posStatus.message && (
+              <div className={`p-3 rounded-xl border text-center text-xs font-bold animate-in fade-in slide-in-from-top-2 ${posStatus.type === 'success' ? 'bg-green-500/10 border-green-500/30 text-green-500' : 'bg-red-500/10 border-red-500/30 text-red-500'}`}>
+                {posStatus.message}
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <div className="flex justify-between items-center px-1">
+                <h3 className="text-[10px] font-bold text-text-dim uppercase tracking-widest">Rincian Penjualan ({cart.length})</h3>
+                {cart.length > 0 && <button onClick={() => setCart([])} className="text-[9px] text-red-500 font-bold uppercase">Kosongkan</button>}
+              </div>
+
+              <div className="space-y-2 max-h-[300px] md:max-h-[500px] overflow-y-auto scrollbar-hide py-2">
+                {cart.length > 0 ? cart.map((item, idx) => (
+                  <div key={`${item.sn}-${idx}`} className="glass-card p-3 flex justify-between items-center border-white/5 animate-in slide-in-from-right-4">
+                    <div className="flex-1">
+                      <p className="text-[8px] font-black text-accent-blue/80 uppercase tracking-widest leading-none mb-1">
+                        {item.provider}
+                      </p>
+                      <p className="text-[10px] font-bold tracking-tight">
+                        {item.category === 'aksesoris' ? `${item.variantName} ${item.name}` : `${item.name} - ${item.variantName}`}
+                      </p>
+                      <p className="text-[8px] text-text-dim font-mono">{item.sn}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs font-bold text-accent-blue">{formatRupiah(item.price)}</p>
+                      <button onClick={() => setCart(prev => prev.filter((_, i) => i !== idx))} className="text-[9px] text-red-500/50 hover:text-red-500 font-bold">Batal</button>
+                    </div>
+                  </div>
+                )) : (
+                  <div className="p-12 text-center glass-card border-dashed border-white/10 opacity-30">
+                    <ShoppingCart size={32} className="mx-auto mb-2 opacity-50" />
+                    <p className="text-[10px] uppercase font-bold tracking-widest">Keranjang Kosong</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {cart.length > 0 && (
+              <div className="fixed bottom-20 left-4 right-4 md:static md:bottom-auto md:left-auto md:right-auto md:mt-6 animate-in slide-in-from-bottom-10">
+                <div className="glass-card p-4 border-accent-blue/50 shadow-2xl shadow-accent-blue/20 space-y-3 bg-gray-900/90 md:bg-gray-900/40 backdrop-blur-3xl">
+                  <div className="flex justify-between items-center px-1">
+                    <p className="text-[10px] font-bold text-text-dim uppercase tracking-[0.2em]">Total Transaksi</p>
+                    <p className="text-xl font-black text-accent-blue">{formatRupiah(totalCart)}</p>
+                  </div>
+                  <button 
+                    onClick={checkout}
+                    className="w-full py-4 bg-accent-blue text-gray-900 rounded-2xl font-black uppercase tracking-widest text-xs shadow-lg shadow-accent-blue/30 active:scale-95 transition"
+                  >
+                    Selesaikan Penjualan
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      case 'history':
+        const filteredTransactions = transactions.filter(t => 
+          userData?.role === 'admin' || userData?.role === 'audit' || t.branchId === userData?.branchId
+        ).sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+
+        return (
+          <div className="space-y-6">
+            <h2 className="text-xl font-black text-text-dim tracking-tight flex items-center gap-2">
+              <History size={20} className="text-accent-blue" /> RIWAYAT PENJUALAN
+            </h2>
+            <div className="space-y-4 pb-20">
+              {filteredTransactions.length > 0 ? filteredTransactions.map((tx) => (
+                <div key={tx.id} className="glass-card p-4 space-y-3 border-white/5">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className="text-[10px] font-bold text-accent-blue uppercase">{tx.branchName}</p>
+                      <p className="text-[8px] text-text-dim">{tx.timestamp?.toDate().toLocaleString('id-ID')}</p>
+                    </div>
+                    <div className="text-right">
+                       <p className="text-sm font-black text-white">{formatRupiah(tx.totalAmount)}</p>
+                       <p className="text-[8px] text-text-dim uppercase tracking-widest">{tx.employeeName}</p>
+                    </div>
+                  </div>
+                  <div className="space-y-1 border-t border-white/5 pt-2">
+                    {tx.items.map((it: any, i: number) => (
+                      <div key={i} className="flex justify-between text-[10px]">
+                        <span className="text-text-dim"><span className="text-accent-blue">[{it.provider}]</span> {it.name} - {it.variantName}</span>
+                        <span className="font-mono text-[8px] opacity-50">{it.sn}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )) : (
+                <div className="text-center py-20 text-text-dim italic text-xs">Belum ada transaksi tercatat.</div>
+              )}
+            </div>
+          </div>
+        );
+      case 'transfers':
+        const filteredTransfers = transfers.filter(t => 
+          userData?.role === 'admin' || userData?.role === 'audit'
+        ).sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+
+        return (
+          <div className="space-y-6 pb-20">
+             <div className="flex justify-between items-center">
+                <h2 className="text-xl font-black text-text-dim tracking-tight flex items-center gap-2">
+                  <ArrowLeftRight size={20} className="text-accent-blue" /> TRANSFER STOK
+                </h2>
+                <button 
+                  onClick={() => setShowTransferModal(true)}
+                  className="bg-accent-blue/10 text-accent-blue border border-accent-blue/20 px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest"
+                >
+                  Transfer Baru
+                </button>
+             </div>
+
+             <div className="space-y-3">
+               {filteredTransfers.length > 0 ? filteredTransfers.map((tf) => (
+                 <div key={tf.id} className="glass-card p-4 space-y-2 border-white/5">
+                    <div className="flex items-center justify-between">
+                       <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-bold text-white uppercase">{branches.find(b => b.id === tf.fromBranchId)?.name}</span>
+                          <ArrowLeftRight size={10} className="text-accent-blue" />
+                          <span className="text-[10px] font-bold text-white uppercase">{branches.find(b => b.id === tf.toBranchId)?.name}</span>
+                       </div>
+                       <span className={`text-[8px] font-bold px-2 py-0.5 rounded-full border ${tf.status === 'completed' ? 'border-green-500 text-green-500' : 'border-yellow-500 text-yellow-500'}`}>
+                          {tf.status === 'completed' ? 'Terkirim' : 'Pending'}
+                       </span>
+                    </div>
+                    <p className="text-[10px] font-medium text-text-dim">{tf.productName} ({tf.variantName})</p>
+                    <div className="text-[8px] font-mono text-text-dim italic">
+                       {tf.sns.length} SN: {tf.sns.slice(0, 3).join(', ')}{tf.sns.length > 3 ? '...' : ''}
+                    </div>
+                 </div>
+               )) : (
+                 <div className="text-center py-20 text-text-dim italic text-xs">Belum ada riwayat transfer.</div>
+               )}
+             </div>
+          </div>
+        );
+      default:
+        return <div className="text-center text-text-dim mt-10 italic">Fitur segera hadir.</div>;
+    }
+  };
+
+  const menuItems = React.useMemo(() => {
+    if (!userData) return [];
+    
+    const items = [];
+    
+    // Everyone sees dashboard except maybe pure POS users? User said Bos kusus dasbor.
+    if (userData.role === 'admin' || userData.role === 'audit') {
+      items.push({ id: 'dashboard', label: 'Home', icon: LayoutDashboard });
+    }
+
+    if (userData.role === 'employee') {
+      items.push({ id: 'shopping', label: 'Kasir', icon: ShoppingCart });
+    }
+
+    // Products (Katalog/Stok)
+    items.push({ id: 'products', label: 'Stok', icon: Package });
+
+    if (userData.role === 'audit' || userData.role === 'admin') {
+      items.push({ id: 'transfers', label: 'Transfer', icon: ArrowLeftRight });
+    }
+
+    items.push({ id: 'history', label: 'Riwayat', icon: History });
+
+    if (userData.role === 'admin') {
+      items.push({ id: 'system', label: 'Sistem', icon: Settings });
+    }
+
+    return items;
+  }, [userData]);
+
+  return (
+    <div className="min-h-screen bg-gray-900 text-text-main pb-24 md:pb-0 md:pl-24">
+      <div className="max-w-2xl mx-auto p-4 md:p-8">
+        <header className="mb-6 flex justify-between items-center pt-4">
+          <div className="flex flex-col">
+            <h1 className="text-2xl md:text-3xl font-black bg-gradient-to-r from-white to-accent-blue bg-clip-text text-transparent tracking-tighter">ALPATPULSA</h1>
+            <p className="text-[10px] text-accent-blue/50 font-bold uppercase tracking-[0.3em]">Inventory System</p>
+          </div>
+          {user && (
+            <div className="flex items-center gap-4">
+              <div className="hidden md:block text-right">
+                <p className="text-xs font-bold">{user.displayName || 'User'}</p>
+                <p className="text-[9px] text-text-dim uppercase tracking-widest">{userData?.role}</p>
+              </div>
+              <button onClick={() => auth.signOut()} className="w-10 h-10 rounded-full bg-accent-blue/10 border border-accent-blue/30 flex items-center justify-center text-xs font-bold hover:bg-accent-blue hover:text-gray-900 transition-all">
+                {user.email?.[0].toUpperCase()}
+              </button>
+            </div>
+          )}
+        </header>
+
+        {!user ? (
+          <div className="flex flex-col items-center justify-center mt-32 space-y-6">
+            <div className="w-20 h-20 glass-card flex items-center justify-center"><Package size={40} className="text-accent-blue" /></div>
+            <div className="text-center space-y-2">
+              <h2 className="text-2xl font-bold">Alpatpulsa System</h2>
+              <p className="text-text-dim text-sm px-10">Manajemen Stok & SN Unik Antar Cabang.</p>
+            </div>
+            <button onClick={login} className="w-full max-w-xs bg-accent-blue text-gray-900 py-4 rounded-2xl font-bold hover:scale-105 transition shadow-lg shadow-accent-blue/20">Masuk dengan Google</button>
+          </div>
+        ) : renderContent()}
+      </div>
+
+      {user && (userData?.isApproved || userData?.role === 'admin') && (
+        <nav className="fixed bottom-0 left-0 right-0 md:top-0 md:bottom-0 md:left-0 md:right-auto md:w-24 bg-gray-950/90 backdrop-blur-2xl border-t md:border-t-0 md:border-r border-white/10 p-3 md:pt-24 flex md:flex-col justify-around md:justify-start md:gap-8 shadow-2xl z-50">
+          {menuItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button 
+                key={item.id} 
+                onClick={() => setActiveMenu(item.id)} 
+                className={`flex flex-col items-center px-4 md:px-0 py-1 md:py-4 rounded-2xl transition-all duration-300 ${activeMenu === item.id ? 'text-accent-blue scale-110' : 'text-text-dim opacity-50 hover:opacity-100'}`}
+              >
+                <Icon size={24} strokeWidth={activeMenu === item.id ? 2.5 : 2} />
+                <span className={`text-[9px] mt-1 font-bold uppercase tracking-tighter ${activeMenu === item.id ? 'block' : 'hidden md:block opacity-50'}`}>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      )}
+
+      {/* Custom Confirmation Modal */}
+      {showCameraScanner && (
+        <CameraScanner 
+          title={showCameraScanner === 'stock' ? 'Input Stok SN' : showCameraScanner === 'stock-initial' ? 'Scan SN Awal' : 'Scan Kasir POS'}
+          onClose={() => setShowCameraScanner(null)}
+          onScan={async (sn) => {
+            if (showCameraScanner === 'stock-initial') {
+              setNewProduct(prev => ({ ...prev, sn }));
+              setShowCameraScanner(null);
+            } else if (showCameraScanner === 'stock') {
+               if (!selectedBranch || !viewState.product || !viewState.variant) return;
+               const itemRef = doc(db, `branches/${selectedBranch}/inventory`, `${viewState.product.id}_${viewState.variant.id}`);
+               const currentData = branchInventory[`${viewState.product.id}_${viewState.variant.id}`] || { sns: [] };
+               
+               if (!currentData.sns.includes(sn)) {
+                 await setDoc(itemRef, {
+                   productId: viewState.product.id,
+                   variantId: viewState.variant.id,
+                   sns: [...currentData.sns, sn],
+                   stock: (currentData.stock || 0) + 1,
+                   lastUpdated: serverTimestamp()
+                 });
+                 setShowCameraScanner(null); // Tutup kamera setelah sukses scan
+                 const dispName = viewState.product.category === 'aksesoris' ? `${viewState.product.provider} ${viewState.variant.name} ${viewState.product.name}` : `${viewState.product.name} - ${viewState.variant.name}`;
+                 setPosStatus({ message: `📦 Masuk: ${dispName} (SN: ${sn})`, type: 'success' });
+                 setTimeout(() => setPosStatus({ message: '', type: 'info' }), 2000);
+               } else {
+                 setPosStatus({ message: `SN ${sn} sudah ada!`, type: 'error' });
+                 setTimeout(() => setPosStatus({ message: '', type: 'info' }), 2000);
+               }
+            } else {
+              // POS Mode
+              setPosScannerInput(sn);
+              // Trigger scan logic (we need to mirror handlePOSScan logic)
+              let found = false;
+              for (const key in branchInventory) {
+                const inv = branchInventory[key];
+                if (inv.sns.includes(sn)) {
+                  const product = products.find(p => p.id === inv.productId);
+                  if (product) {
+                    const variant = product.variants.find((v: any) => v.id === inv.variantId);
+                    if (variant) {
+                      setCart(prev => [...prev, {
+                        sn,
+                        productId: product.id,
+                        variantId: variant.id,
+                        name: product.name,
+                        variantName: variant.name,
+                        price: variant.sellingPrice,
+                        category: product.category,
+                        provider: product.provider
+                      }]);
+                      const displayName = product.category === 'aksesoris' ? `${product.provider} ${variant.name} ${product.name}` : `${product.name} - ${variant.name}`;
+                      setPosStatus({ message: `Scanned: ${displayName}`, type: 'success' });
+                      found = true;
+                      setShowCameraScanner(null); // Close on success in POS for better UX
+                      break;
+                    }
+                  }
+                }
+              }
+              if (!found) {
+                setPosStatus({ message: `SN ${sn} tidak ditemukan!`, type: 'error' });
+                setTimeout(() => setPosStatus({ message: '', type: 'info' }), 2000);
+              }
+            }
+          }}
+        />
+      )}
+      
+      {/* Transfer Modal */}
+      {showTransferModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setShowTransferModal(false)}></div>
+          <div className="relative glass-card w-full max-w-lg p-6 space-y-6 border border-white/20 animate-in zoom-in duration-300">
+             <div className="flex justify-between items-center">
+                <h3 className="text-lg font-black uppercase tracking-widest text-accent-blue flex items-center gap-2">
+                   <ArrowLeftRight size={20} /> Transfer Unit Antar Cabang
+                </h3>
+                <button onClick={() => setShowTransferModal(false)} className="p-2 text-text-dim hover:text-white"><X size={20} /></button>
+             </div>
+
+             <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                   <div className="space-y-1">
+                      <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Cabang Asal</p>
+                      <select 
+                        className="w-full bg-white/5 border border-white/10 p-3 rounded-xl text-xs focus:outline-none focus:border-accent-blue/50"
+                        value={transferConfig.fromBranchId as any}
+                        onChange={e => setTransferConfig({...transferConfig, fromBranchId: e.target.value})}
+                      >
+                         <option value="">Pilih Cabang Asal</option>
+                         {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </select>
+                   </div>
+                   <div className="space-y-1">
+                      <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Cabang Tujuan</p>
+                      <select 
+                        className="w-full bg-white/5 border border-white/10 p-3 rounded-xl text-xs focus:outline-none focus:border-accent-blue/50"
+                        value={transferConfig.toBranchId}
+                        onChange={e => setTransferConfig({...transferConfig, toBranchId: e.target.value})}
+                      >
+                         <option value="">Pilih Cabang Tujuan</option>
+                         {branches.filter(b => b.id !== transferConfig.fromBranchId).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </select>
+                   </div>
+                </div>
+
+                {transferConfig.fromBranchId && (
+                  <>
+                    <div className="space-y-1">
+                       <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Produk & SN</p>
+                       <textarea 
+                        className="w-full bg-black/40 border border-white/10 p-3 rounded-xl text-xs font-mono h-24 focus:outline-none focus:border-accent-blue/50"
+                        placeholder="Scan SN-SN yang akan dipindah ke sini..."
+                        value={transferConfig.sns.join('\n')}
+                        onChange={e => setTransferConfig({...transferConfig, sns: e.target.value.split('\n').filter(s => s.trim())})}
+                       />
+                       <p className="text-[8px] text-text-dim italic">Gunakan ENTER untuk memisahkan SN.</p>
+                    </div>
+
+                    <div className="space-y-1">
+                       <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Cari Produk Katalog (Target)</p>
+                       <select 
+                        className="w-full bg-white/5 border border-white/10 p-3 rounded-xl text-xs focus:outline-none focus:border-accent-blue/50"
+                        onChange={e => {
+                          const [pId, vId] = e.target.value.split(':');
+                          setTransferConfig({...transferConfig, productId: pId, variantId: vId});
+                        }}
+                       >
+                          <option value="">Pilih Produk yang dipindah</option>
+                          {products.map(p => p.variants.map((v: any) => (
+                            <option key={`${p.id}-${v.id}`} value={`${p.id}:${v.id}`}>
+                              [{p.provider}] {p.name} - {v.name}
+                            </option>
+                          )))}
+                       </select>
+                    </div>
+                  </>
+                )}
+
+                <button 
+                  onClick={handleTransfer}
+                  disabled={!transferConfig.toBranchId || transferConfig.sns.length === 0 || !transferConfig.productId}
+                  className="w-full py-4 bg-accent-blue text-gray-900 rounded-2xl font-black uppercase tracking-widest text-xs shadow-lg shadow-accent-blue/20 disabled:opacity-50 disabled:grayscale transition"
+                >
+                  Eksekusi Pemindahan Stok
+                </button>
+             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Disposal Modal */}
+      {showDisposalModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setShowDisposalModal(false)}></div>
+          <div className="relative glass-card w-full max-w-sm p-8 space-y-6 border border-white/20 animate-in zoom-in duration-300">
+             <div className="space-y-4 text-center">
+                <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto text-red-500">
+                   <RotateCcw size={32} />
+                </div>
+                <div className="space-y-1">
+                   <h3 className="text-lg font-black uppercase tracking-widest text-red-500">Pemusnahan / Retur</h3>
+                   <p className="text-xs text-text-dim">Pilih alasan barang dikeluarkan dari stok cabang.</p>
+                </div>
+             </div>
+
+             <div className="space-y-3">
+                {['broken', 'return', 'lost'].map((r) => (
+                  <button 
+                    key={r}
+                    onClick={() => setDisposalConfig({...disposalConfig, reason: r})}
+                    className={`w-full p-4 rounded-xl border text-xs font-bold uppercase tracking-widest transition-all ${disposalConfig.reason === r ? 'bg-red-500 text-white border-red-500 shadow-lg shadow-red-500/20' : 'bg-white/5 border-white/10 text-text-dim'}`}
+                  >
+                    {r === 'broken' ? 'Barang Rusak / Cacat' : r === 'return' ? 'Retur ke Pusat' : 'Barang Hilang'}
+                  </button>
+                ))}
+             </div>
+
+             <div className="flex gap-4">
+                <button 
+                  onClick={handleDisposal}
+                  className="flex-1 py-4 bg-red-500 text-white rounded-2xl font-black uppercase tracking-widest text-[10px]"
+                >
+                  Konfirmasi Laporan
+                </button>
+                <button 
+                  onClick={() => setShowDisposalModal(false)}
+                  className="px-6 py-4 glass-card border-white/10 text-[10px] font-bold uppercase tracking-widest"
+                >
+                  Batal
+                </button>
+             </div>
+          </div>
+        </div>
+      )}
+
+      {confirmModal.show && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setConfirmModal(prev => ({ ...prev, show: false }))}></div>
+          <div className="relative glass-card w-full max-w-sm p-8 space-y-6 border border-white/20 animate-in zoom-in duration-300">
+            <div className="space-y-4 text-center">
+              <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto text-red-500">
+                <ShieldAlert size={32} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-lg font-black uppercase tracking-widest text-accent-blue">{confirmModal.title}</h3>
+                <p className="text-xs text-text-dim leading-relaxed">{confirmModal.message}</p>
+              </div>
+            </div>
+            <div className="flex gap-4">
+              <button 
+                onClick={confirmModal.onConfirm}
+                className="flex-1 py-4 bg-red-500 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-lg shadow-red-500/20 active:scale-95 transition"
+              >
+                {confirmModal.title === "Produk Duplikat" ? "Tutup" : "Ya, Hapus"}
+              </button>
+              {confirmModal.title !== "Produk Duplikat" && (
+                <button 
+                  onClick={() => setConfirmModal(prev => ({ ...prev, show: false }))}
+                  className="px-6 py-4 glass-card border-white/10 opacity-70 font-bold uppercase tracking-widest text-[10px] active:scale-95 transition"
+                >
+                  Batal
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

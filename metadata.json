@@ -1,0 +1,6 @@
+{
+  "name": "Alpatpulsa Inventory",
+  "description": "Aplikasi untuk merekap voucher dan perdana antar cabang Alpatpulsa.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": []
+}

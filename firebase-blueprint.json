@@ -1,0 +1,95 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User account data with roles",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "audit", "employee"] },
+        "isApproved": { "type": "boolean" },
+        "branchId": { "type": "string", "description": "Assigned branch for employees" }
+      }
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Master product catalog with variants",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "provider": { "type": "string" },
+        "category": { "type": "string", "enum": ["voucher", "perdana", "aksesoris"] },
+        "variants": { "type": "array" }
+      }
+    },
+    "Branch": {
+      "title": "Branch",
+      "description": "Store location/branch",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "location": { "type": "string" }
+      }
+    },
+    "InventoryItem": {
+      "title": "Inventory Item",
+      "description": "Stock tracking for a specific product variant in a branch",
+      "type": "object",
+      "properties": {
+        "productId": { "type": "string" },
+        "variantId": { "type": "string" },
+        "sns": { "type": "array", "description": "List of serial numbers" },
+        "stock": { "type": "number" }
+      }
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Sales record",
+      "type": "object",
+      "properties": {
+        "branchId": { "type": "string" },
+        "employeeId": { "type": "string" },
+        "items": { "type": "array" },
+        "total": { "type": "number" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      }
+    },
+    "StockTransfer": {
+      "title": "Stock Transfer",
+      "description": "Movement of products between branches",
+      "type": "object",
+      "properties": {
+        "fromBranchId": { "type": "string" },
+        "toBranchId": { "type": "string" },
+        "productId": { "type": "string" },
+        "variantId": { "type": "string" },
+        "sns": { "type": "array" },
+        "status": { "type": "string", "enum": ["pending", "completed"] },
+        "requestedBy": { "type": "string" }
+      }
+    },
+    "StockDisposal": {
+      "title": "Stock Disposal",
+      "description": "Destruction or return of defective products",
+      "type": "object",
+      "properties": {
+        "branchId": { "type": "string" },
+        "productId": { "type": "string" },
+        "variantId": { "type": "string" },
+        "sns": { "type": "array" },
+        "reason": { "type": "string", "enum": ["broken", "return", "lost"] },
+        "reportedBy": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": { "schema": "User", "description": "All system users" },
+    "/products/{productId}": { "schema": "Product", "description": "Master catalog" },
+    "/branches/{branchId}": { "schema": "Branch", "description": "Branch locations" },
+    "/branches/{branchId}/inventory/{itemId}": { "schema": "InventoryItem", "description": "Local stock" },
+    "/transactions/{transactionId}": { "schema": "Transaction", "description": "Sales history" },
+    "/transfers/{transferId}": { "schema": "StockTransfer", "description": "Stock transfers" },
+    "/disposals/{disposalId}": { "schema": "StockDisposal", "description": "Faulty/Returned goods" }
+  }
+}
