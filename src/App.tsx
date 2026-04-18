@@ -118,6 +118,8 @@ export default function App() {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [transfers, setTransfers] = useState<any[]>([]);
   const [disposals, setDisposals] = useState<any[]>([]);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [historyTab, setHistoryTab] = useState<'sales' | 'audit'>('sales');
   
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [transferConfig, setTransferConfig] = useState({ toBranchId: '', productId: '', variantId: '', sns: [] as string[] });
@@ -332,7 +334,7 @@ export default function App() {
       // Isolate branch fetching: Admins see all, Employees see only their one branch
       let unsubBranches = () => {};
       
-      if (userData?.role === 'admin') {
+      if (userData?.role === 'admin' || userData?.role === 'audit') {
         const branchesRef = collection(db, 'branches');
         unsubBranches = onSnapshot(branchesRef, (snapshot) => {
           const branchData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -367,19 +369,33 @@ export default function App() {
       let unsubTransfers = () => {};
       let unsubDisposals = () => {};
       let unsubHandovers = () => {};
+      let unsubAuditLogs = () => {};
 
-      if (userData?.role === 'admin') {
+      if (userData?.role === 'admin' || userData?.role === 'audit') {
         unsubTransactions = onSnapshot(collection(db, 'transactions'), (snapshot) => {
           setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        }, (error) => {
+          handleFirestoreError(error, OperationType.LIST, 'transactions');
         });
         unsubTransfers = onSnapshot(collection(db, 'transfers'), (snapshot) => {
           setTransfers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        }, (error) => {
+          handleFirestoreError(error, OperationType.LIST, 'transfers');
         });
         unsubDisposals = onSnapshot(collection(db, 'disposals'), (snapshot) => {
           setDisposals(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        }, (error) => {
+          handleFirestoreError(error, OperationType.LIST, 'disposals');
         });
         unsubHandovers = onSnapshot(collection(db, 'handovers'), (snapshot) => {
           setHandovers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        }, (error) => {
+          handleFirestoreError(error, OperationType.LIST, 'handovers');
+        });
+        unsubAuditLogs = onSnapshot(collection(db, 'audit_logs'), (snapshot) => {
+          setAuditLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        }, (error) => {
+          handleFirestoreError(error, OperationType.LIST, 'audit_logs');
         });
       } else if (userData?.branchId) {
         // Employees only listen to their branch transactions
@@ -396,6 +412,7 @@ export default function App() {
         unsubTransfers(); 
         unsubDisposals(); 
         unsubHandovers();
+        unsubAuditLogs();
       };
     }
   }, [userData, selectedBranch]);
@@ -493,6 +510,22 @@ export default function App() {
         }
       }
     });
+  };
+
+  const logAuditAction = async (action: string, details: any) => {
+    try {
+      await addDoc(collection(db, 'audit_logs'), {
+        userId: user?.uid,
+        userName: userData?.name,
+        role: userData?.role,
+        action,
+        details,
+        branchId: details.branchId || selectedBranch,
+        timestamp: serverTimestamp()
+      });
+    } catch (e) {
+      console.error("Audit log failed:", e);
+    }
   };
 
   const handleDeleteSN = async (sn: string) => {
@@ -1132,13 +1165,17 @@ export default function App() {
         const totalDaily = dailyTx.reduce((acc, curr) => acc + curr.totalAmount, 0);
         const profitDaily = dailyTx.reduce((acc, curr) => acc + (curr.totalProfit || 0), 0);
 
-        if (userData?.role === 'admin') {
+        if (userData?.role === 'admin' || userData?.role === 'audit') {
           return (
             <div className="space-y-6 pb-10">
               <div className="flex justify-between items-center px-1">
                 <div>
-                  <h2 className="text-xl font-black text-white tracking-widest uppercase">Admin Panel</h2>
-                  <p className="text-[10px] text-text-dim uppercase font-bold tracking-widest">Dashboard Kendali Sistem</p>
+                  <h2 className="text-xl font-black text-white tracking-widest uppercase">
+                    {userData.role === 'admin' ? 'Admin Panel' : 'Audit Panel'}
+                  </h2>
+                  <p className="text-[10px] text-text-dim uppercase font-bold tracking-widest">
+                    {userData.role === 'admin' ? 'Dashboard Kendali Sistem' : 'Monitor & Audit Cabang'}
+                  </p>
                 </div>
                 <select 
                   className="bg-gray-800 text-[10px] border border-glass-border px-3 py-2 rounded-xl focus:outline-none focus:border-accent-blue/50 text-white font-bold"
@@ -2293,7 +2330,7 @@ export default function App() {
                       ) : (
                         <>
                           <div className="p-4 bg-white/5 rounded-2xl border border-white/5 group relative hover:border-accent-blue/30 transition-all cursor-pointer" onClick={() => {
-                                  if (userData?.role === 'admin') {
+                                  if (userData?.role === 'admin' || userData?.role === 'audit') {
                                     setEditPrice({
                                       modalPrice: viewState.variant.modalPrice || 0,
                                       sellingPrice: viewState.variant.sellingPrice || 0,
@@ -2314,7 +2351,7 @@ export default function App() {
                             </div>
                           </div>
                           <div className="p-4 bg-white/5 rounded-2xl border border-white/5 group relative hover:border-green-500/30 transition-all cursor-pointer" onClick={() => {
-                                  if (userData?.role === 'admin') {
+                                  if (userData?.role === 'admin' || userData?.role === 'audit') {
                                     setEditPrice({
                                       modalPrice: viewState.variant.modalPrice || 0,
                                       sellingPrice: viewState.variant.sellingPrice || 0,
@@ -3059,57 +3096,113 @@ export default function App() {
           userData?.role === 'admin' || userData?.role === 'audit' || t.branchId === userData?.branchId
         ).sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
 
-        return (
-          <div className="space-y-6">
-            <h2 className="text-xl font-black text-text-dim tracking-tight flex items-center gap-2">
-              <History size={20} className="text-accent-blue" /> RIWAYAT PENJUALAN
-            </h2>
-            <div className="space-y-4 pb-20">
-              {filteredTransactions.length > 0 ? filteredTransactions.map((tx) => (
-                <div key={tx.id} className="glass-card p-4 space-y-3 border-white/5">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <p className="text-[10px] font-bold text-accent-blue uppercase">{tx.branchName}</p>
-                      <p className="text-[8px] text-text-dim">{tx.timestamp?.toDate().toLocaleString('id-ID')}</p>
-                    </div>
-                    <div className="text-right">
-                       <p className={`text-sm font-black ${tx.status === 'returned' ? 'text-red-500 line-through' : 'text-white'}`}>{formatRupiah(tx.totalAmount)}</p>
-                       <p className="text-[8px] text-text-dim uppercase tracking-widest">{tx.employeeName}</p>
-                    </div>
-                  </div>
-                  <div className="space-y-1 border-y border-white/5 py-2">
-                    {tx.items.map((it: any, i: number) => (
-                      <div key={i} className="flex justify-between text-[10px]">
-                        <span className="text-text-dim"><span className="text-accent-blue">[{it.provider}]</span> {it.name} - {it.variantName}</span>
-                        <span className="font-mono text-[8px] opacity-50">{it.sn}</span>
-                      </div>
-                    ))}
-                  </div>
+        const sortedAuditLogs = auditLogs.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
 
-                  <div className="flex justify-between items-center pt-1">
-                     {tx.status === 'returned' ? (
-                        <div className="flex items-center gap-1.5 text-red-500">
-                           <RotateCcw size={10} />
-                           <span className="text-[8px] font-black uppercase tracking-widest">Barang Telah Diretur</span>
-                        </div>
-                     ) : (
-                        <button 
-                           onClick={() => handleReturnTransaction(tx)}
-                           className="flex items-center gap-1.5 text-text-dim hover:text-red-500 transition-colors"
-                        >
-                           <RotateCcw size={10} />
-                           <span className="text-[8px] font-black uppercase tracking-widest">Retur Barang</span>
-                        </button>
-                     )}
-                     {tx.status === 'returned' && tx.returnedByName && (
-                        <span className="text-[7px] text-text-dim italic">Oleh: {tx.returnedByName}</span>
-                     )}
-                  </div>
+        return (
+          <div className="space-y-6 pb-20">
+            <div className="flex justify-between items-center bg-gray-900/40 p-3 rounded-2xl border border-white/5">
+              <h2 className="text-xl font-black text-text-dim tracking-tight flex items-center gap-2">
+                <History size={20} className="text-accent-blue" /> RIWAYAT
+              </h2>
+              {(userData?.role === 'admin' || userData?.role === 'audit') && (
+                <div className="flex bg-black/40 p-1 rounded-xl border border-white/10">
+                  <button 
+                    onClick={() => setHistoryTab('sales')}
+                    className={`px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase transition-all ${historyTab === 'sales' ? 'bg-accent-blue text-gray-900 shadow-lg' : 'text-text-dim hover:text-white'}`}
+                  >
+                    Penjualan
+                  </button>
+                  <button 
+                    onClick={() => setHistoryTab('audit')}
+                    className={`px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase transition-all ${historyTab === 'audit' ? 'bg-accent-blue text-gray-900 shadow-lg' : 'text-text-dim hover:text-white'}`}
+                  >
+                    Audit Log
+                  </button>
                 </div>
-              )) : (
-                <div className="text-center py-20 text-text-dim italic text-xs">Belum ada transaksi tercatat.</div>
               )}
             </div>
+
+            {historyTab === 'sales' ? (
+              <div className="space-y-4">
+                {filteredTransactions.length > 0 ? filteredTransactions.map((tx) => (
+                  <div key={tx.id} className="glass-card p-4 space-y-3 border-white/5">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="text-[10px] font-bold text-accent-blue uppercase">{tx.branchName}</p>
+                        <p className="text-[8px] text-text-dim">{tx.timestamp?.toDate().toLocaleString('id-ID')}</p>
+                      </div>
+                      <div className="text-right">
+                         <p className={`text-sm font-black ${tx.status === 'returned' ? 'text-red-500 line-through' : 'text-white'}`}>{formatRupiah(tx.totalAmount)}</p>
+                         <p className="text-[8px] text-text-dim uppercase tracking-widest">{tx.employeeName}</p>
+                      </div>
+                    </div>
+                    <div className="space-y-1 border-y border-white/5 py-2">
+                      {tx.items.map((it: any, i: number) => (
+                        <div key={i} className="flex justify-between text-[10px]">
+                          <span className="text-text-dim"><span className="text-accent-blue">[{it.provider}]</span> {it.name} - {it.variantName}</span>
+                          <span className="font-mono text-[8px] opacity-50">{it.sn}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex justify-between items-center pt-1">
+                       {tx.status === 'returned' ? (
+                          <div className="flex items-center gap-1.5 text-red-500">
+                             <RotateCcw size={10} />
+                             <span className="text-[8px] font-black uppercase tracking-widest">Barang Telah Diretur</span>
+                          </div>
+                       ) : (
+                          <button 
+                             onClick={() => handleReturnTransaction(tx)}
+                             className="flex items-center gap-1.5 text-text-dim hover:text-red-500 transition-colors"
+                          >
+                             <RotateCcw size={10} />
+                             <span className="text-[8px] font-black uppercase tracking-widest">Retur Barang</span>
+                          </button>
+                       )}
+                    </div>
+                  </div>
+                )) : (
+                  <div className="text-center py-20 text-text-dim italic text-xs">Belum ada transaksi tercatat.</div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {sortedAuditLogs.length > 0 ? sortedAuditLogs.map((log) => (
+                  <div key={log.id} className="glass-card p-3 border-white/5 flex gap-3 items-center">
+                    <div className={`p-2 rounded-xl border ${
+                      log.action.includes('tambah') ? 'bg-green-500/10 border-green-500/20 text-green-500' : 'bg-accent-blue/10 border-accent-blue/20 text-accent-blue'
+                    }`}>
+                      <Package size={16} />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex justify-between items-start">
+                        <p className="text-[10px] font-black text-white uppercase tracking-tight">
+                          {log.action === 'tambah_stok' || log.action === 'tambah_stok_manual' ? 'Restok (1 Pcs)' : 
+                           log.action === 'tambah_stok_masal' ? `Restok (${log.details.qty} Pcs)` : log.action}
+                        </p>
+                        <span className="text-[8px] text-text-dim whitespace-nowrap">{log.timestamp?.toDate().toLocaleString('id-ID')}</span>
+                      </div>
+                      <p className="text-[8px] text-accent-blue font-bold uppercase tracking-widest mb-1">{log.details.branchName}</p>
+                      <p className="text-[9px] text-text-dim font-bold">
+                        {log.details.productName} - {log.details.variantName} 
+                        {log.details.sn && <span className="text-white ml-2 font-mono">({log.details.sn})</span>}
+                      </p>
+                      <div className="mt-2 flex items-center justify-between">
+                         <p className="text-[7px] text-accent-blue/60 uppercase font-black tracking-tighter">Auditor: {log.userName}</p>
+                         {log.action === 'tambah_stok_masal' && (
+                            <p className="text-[7px] text-text-dim italic">Range: {log.details.startSN} - {log.details.endSN}</p>
+                         )}
+                      </div>
+                    </div>
+                  </div>
+                )) : (
+                  <div className="text-center py-24 text-text-dim italic text-xs font-bold uppercase tracking-[0.2em] bg-white/[0.02] rounded-3xl border border-dashed border-white/10">
+                    Belum ada riwayat audit.
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         );
       case 'transfers':
@@ -3165,11 +3258,12 @@ export default function App() {
     
     const items = [];
     
-    // Everyone sees dashboard except maybe pure POS users? User said Bos kusus dasbor.
     if (userData.role === 'admin' || userData.role === 'audit') {
       items.push({ id: 'dashboard', label: 'Home', icon: LayoutDashboard });
       items.push({ id: 'restock', label: 'Restok', icon: AlertTriangle });
-      items.push({ id: 'reports', label: 'Laporan', icon: FileSpreadsheet });
+      if (userData.role === 'admin') {
+        items.push({ id: 'reports', label: 'Laporan', icon: FileSpreadsheet });
+      }
     }
 
     if (userData.role === 'employee') {
@@ -3285,8 +3379,9 @@ export default function App() {
               setShowCameraScanner(null);
             } else if (showCameraScanner === 'stock') {
                if (!selectedBranch || !viewState.product || !viewState.variant) return;
-               const itemRef = doc(db, `branches/${selectedBranch}/inventory`, `${viewState.product.id}_${viewState.variant.id}`);
-               const currentData = branchInventory[`${viewState.product.id}_${viewState.variant.id}`] || { sns: [] };
+               const itemKey = `${viewState.product.id}_${viewState.variant.id}`;
+               const itemRef = doc(db, `branches/${selectedBranch}/inventory`, itemKey);
+               const currentData = branchInventory[itemKey] || { sns: [] };
                
                if (!currentData.sns.includes(sn)) {
                  await setDoc(itemRef, {
@@ -3296,7 +3391,16 @@ export default function App() {
                    stock: (currentData.stock || 0) + 1,
                    lastUpdated: serverTimestamp()
                  });
-                 setShowCameraScanner(null); // Tutup kamera setelah sukses scan
+
+                 await logAuditAction('tambah_stok', {
+                   productName: viewState.product.name,
+                   variantName: viewState.variant.name,
+                   sn,
+                   branchId: selectedBranch,
+                   branchName: branches.find(b => b.id === selectedBranch)?.name || 'Cabang'
+                 });
+
+                 setShowCameraScanner(null);
                  const dispName = viewState.product.category === 'aksesoris' ? `${viewState.product.provider} ${viewState.variant.name} ${viewState.product.name}` : `${viewState.product.name} - ${viewState.variant.name}`;
                  setPosStatus({ message: `📦 Masuk: ${dispName} (SN: ${sn})`, type: 'success' });
                  setTimeout(() => setPosStatus({ message: '', type: 'info' }), 2000);

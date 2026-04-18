@@ -82,9 +82,14 @@ service cloud.firestore {
     }
 
     match /handovers/{handoverId} {
-      allow read: if isAdmin();
+      allow read: if isAdmin() || isAudit();
       allow create: if isEmployee();
       allow delete: if isAdmin();
+    }
+
+    match /audit_logs/{logId} {
+      allow read: if isAdmin() || isAudit();
+      allow create: if isAdmin() || isAudit();
     }
   }
 }
