@@ -77,6 +77,10 @@ export default function App() {
 
   const [isEditingPrice, setIsEditingPrice] = useState(false);
   const [editPrice, setEditPrice] = useState({ modalPrice: 0, sellingPrice: 0, minStock: 5 });
+  const [isEditingProductName, setIsEditingProductName] = useState(false);
+  const [editProductName, setEditProductName] = useState('');
+  const [isEditingVariantName, setIsEditingVariantName] = useState(false);
+  const [editVariantName, setEditVariantName] = useState('');
 
   const filteredProducts = products.filter(p => {
     const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -686,51 +690,6 @@ export default function App() {
     }
   };
 
-  const deleteVariant = async (productId: string, variantId: string) => {
-    const product = products.find(p => p.id === productId);
-    if (!product) return;
-
-    try {
-      // Check if this variant has stock in any branch
-      const invQuery = query(collectionGroup(db, 'inventory'), where('variantId', '==', variantId));
-      const invSnap = await getDocs(invQuery);
-      const hasStock = invSnap.docs.some(doc => doc.data().stock > 0);
-
-      if (hasStock) {
-        setConfirmModal({
-          show: true,
-          title: "Tipe Dikunci",
-          message: "Tidak dapat menghapus tipe ini karena masih ada stok (SN) yang tersisa di salah satu cabang. Kosongkan stok terlebih dahulu.",
-          confirmText: "Tutup",
-          onConfirm: () => setConfirmModal(prev => ({ ...prev, show: false }))
-        });
-        return;
-      }
-
-      setConfirmModal({
-        show: true,
-        title: "Hapus Tipe/Varian",
-        message: `Hapus tipe barang ini secara permanen dari pusat? Data stok di cabang untuk tipe ini juga akan hilang.`,
-        onConfirm: async () => {
-          try {
-            const newVariants = product.variants.filter((v: any) => v.id !== variantId);
-            if (newVariants.length === 0) {
-              await deleteDoc(doc(db, 'products', productId));
-            } else {
-              await updateDoc(doc(db, 'products', productId), { variants: newVariants });
-            }
-            setViewState({ ...viewState, product: null, variant: null });
-            setConfirmModal(prev => ({ ...prev, show: false }));
-          } catch (error) {
-            handleFirestoreError(error, OperationType.DELETE, `products/${productId}/variants/${variantId}`);
-          }
-        }
-      });
-    } catch (error) {
-      console.error("Error checking variant stock before deletion:", error);
-    }
-  };
-
   const handleTransfer = async () => {
     const { fromBranchId, toBranchId, productId, variantId, sns } = transferConfig;
     if (!fromBranchId || !toBranchId || !productId || !variantId || sns.length === 0) return;
@@ -878,6 +837,65 @@ export default function App() {
       setTimeout(() => setPosStatus({ message: '', type: 'info' }), 3000);
     } catch (error: any) {
       handleFirestoreError(error, OperationType.UPDATE, `products/${viewState.product.id}`);
+    }
+  };
+
+  const handleUpdateProductName = async () => {
+    if (!viewState.product || !editProductName.trim()) return;
+
+    try {
+      const productRef = doc(db, 'products', viewState.product.id);
+      await updateDoc(productRef, {
+        name: editProductName.trim()
+      });
+
+      setViewState({
+        ...viewState,
+        product: {
+          ...viewState.product,
+          name: editProductName.trim()
+        }
+      });
+
+      setIsEditingProductName(false);
+      setPosStatus({ message: "Nama Produk Diperbarui!", type: 'success' });
+      setTimeout(() => setPosStatus({ message: '', type: 'info' }), 3000);
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.UPDATE, `products/${viewState.product.id}`);
+    }
+  };
+
+  const handleUpdateVariantName = async () => {
+    if (!viewState.product || !viewState.variant || !editVariantName.trim()) return;
+
+    try {
+      const productRef = doc(db, 'products', viewState.product.id);
+      const productSnap = await getDoc(productRef);
+      if (!productSnap.exists()) return;
+
+      const variants = productSnap.data().variants || [];
+      const updatedVariants = variants.map((v: any) => {
+        if (v.id === viewState.variant.id) {
+          return { ...v, name: editVariantName.trim() };
+        }
+        return v;
+      });
+
+      await updateDoc(productRef, { variants: updatedVariants });
+
+      setViewState({
+        ...viewState,
+        variant: {
+          ...viewState.variant,
+          name: editVariantName.trim()
+        }
+      });
+
+      setIsEditingVariantName(false);
+      setPosStatus({ message: "Nama Varian Diperbarui!", type: 'success' });
+      setTimeout(() => setPosStatus({ message: '', type: 'info' }), 3000);
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.UPDATE, `products/${viewState.product.id}/variants/${viewState.variant.id}`);
     }
   };
 
@@ -2019,26 +2037,113 @@ export default function App() {
                           </h4>
                           <span className="text-[10px] text-text-dim uppercase tracking-widest">{viewState.product.category}</span>
                         </div>
-                        <h3 className="text-xl font-bold mt-2">{viewState.variant.name}</h3>
-                        {viewState.product.category === 'aksesoris' && viewState.variant.description && (
-                           <p className="text-accent-blue text-[10px] font-bold mt-1 bg-accent-blue/5 px-2 py-1 rounded-lg inline-block border border-accent-blue/10">
+
+                        {isEditingVariantName ? (
+                          <div className="mt-2 flex gap-2">
+                             <input 
+                               type="text"
+                               className="flex-1 bg-black/40 border border-white/10 p-2 rounded-lg text-lg font-bold text-white focus:outline-none focus:border-accent-blue"
+                               value={editVariantName}
+                               onChange={e => setEditVariantName(e.target.value)}
+                               autoFocus
+                             />
+                             <button 
+                               onClick={handleUpdateVariantName}
+                               className="p-2 bg-accent-blue text-gray-900 rounded-lg hover:bg-accent-blue/80 transition"
+                             >
+                                <Plus size={18} />
+                             </button>
+                             <button 
+                               onClick={() => setIsEditingVariantName(false)}
+                               className="p-2 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition"
+                             >
+                                <X size={18} />
+                             </button>
+                          </div>
+                        ) : (
+                          <div className="group flex items-center gap-2 mt-2">
+                            <h3 className="text-xl font-bold">{viewState.variant.name}</h3>
+                            {userData?.role === 'admin' && (
+                              <button 
+                                onClick={() => {
+                                  setEditVariantName(viewState.variant.name);
+                                  setIsEditingVariantName(true);
+                                }}
+                                className="p-1.5 bg-accent-blue/10 text-accent-blue rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <Pencil size={12} />
+                              </button>
+                            )}
+                          </div>
+                        )}
+
+                        {viewState.variant.description && (
+                           <p className={`mt-1 font-bold ${viewState.product.category === 'aksesoris' ? 'text-accent-blue text-[10px] bg-accent-blue/5 px-2 py-1 rounded-lg inline-block border border-accent-blue/10' : 'text-text-dim text-xs italic'}`}>
                              {viewState.variant.description}
                            </p>
                         )}
-                        {viewState.product.category !== 'aksesoris' && viewState.variant.description && (
-                          <p className="text-text-dim text-xs italic mt-1">{viewState.variant.description}</p>
+                        
+                        <div className="flex items-center gap-2 mt-1">
+                          <p className="text-[9px] text-text-dim font-bold uppercase tracking-tighter">Grup: <span className="text-white/60">{viewState.product.name}</span></p>
+                          {userData?.role === 'admin' && !isEditingProductName && (
+                            <button 
+                              onClick={() => {
+                                setEditProductName(viewState.product.name);
+                                setIsEditingProductName(true);
+                              }}
+                              className="p-1 text-accent-blue hover:bg-accent-blue/10 rounded transition"
+                            >
+                              <Pencil size={8} />
+                            </button>
+                          )}
+                        </div>
+
+                        {isEditingProductName && (
+                          <div className="mt-2 flex gap-2">
+                             <input 
+                               type="text"
+                               className="flex-1 bg-black/40 border border-white/10 p-1.5 rounded-lg text-xs font-bold text-white focus:outline-none focus:border-accent-blue"
+                               value={editProductName}
+                               onChange={e => setEditProductName(e.target.value)}
+                               autoFocus
+                             />
+                             <button 
+                               onClick={handleUpdateProductName}
+                               className="p-1.5 bg-accent-blue text-gray-900 rounded-lg hover:bg-accent-blue/80 transition"
+                             >
+                                <Plus size={14} />
+                             </button>
+                             <button 
+                               onClick={() => setIsEditingProductName(false)}
+                               className="p-1.5 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition"
+                             >
+                                <X size={14} />
+                             </button>
+                          </div>
                         )}
                       </div>
                       <div className="flex gap-2">
                         {userData?.role === 'admin' && (
-                          <button 
-                            onClick={() => deleteVariant(viewState.product.id, viewState.variant.id)}
-                            className="bg-red-500/10 text-red-500 p-3 rounded-2xl border border-red-500/20 hover:bg-red-500 hover:text-white transition"
-                          >
-                            <Trash2 size={24} />
-                          </button>
+                          <div className="flex flex-col gap-2">
+                            <button 
+                              onClick={() => handleDeleteVariant(viewState.product.id, viewState.variant.id)}
+                              title="Hapus Tipe/Model Ini"
+                              className="bg-red-500/10 text-red-500 p-2 rounded-xl border border-red-500/20 hover:bg-red-500 hover:text-white transition flex items-center gap-2 group"
+                            >
+                              <History size={14} />
+                              <span className="text-[8px] font-black uppercase hidden group-hover:block">Hapus Tipe</span>
+                            </button>
+                            <button 
+                              onClick={() => handleDeleteProduct(viewState.product.id)}
+                              title="Hapus Seluruh Grup Produk"
+                              className="bg-red-600/20 text-red-500 p-2 rounded-xl border border-red-600/30 hover:bg-red-600 hover:text-white transition flex items-center gap-2 group"
+                            >
+                              <Trash2 size={14} />
+                              <span className="text-[8px] font-black uppercase hidden group-hover:block">Hapus Produk</span>
+                            </button>
+                          </div>
                         )}
-                        <div className="bg-accent-blue/10 p-3 rounded-2xl border border-accent-blue/20">
+                        <div className="bg-accent-blue/10 p-3 rounded-2xl border border-accent-blue/20 h-fit">
                           <Package size={24} className="text-accent-blue" />
                         </div>
                       </div>

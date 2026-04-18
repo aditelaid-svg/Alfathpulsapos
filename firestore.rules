@@ -50,6 +50,11 @@ service cloud.firestore {
       allow write: if isAdmin() || isAudit() || (isEmployee() && getUserData().branchId == branchId);
     }
 
+    // Collection Group rule for inventory queries across all branches (Admin/Audit only)
+    match /{path=**}/inventory/{itemId} {
+      allow read: if isAdmin() || isAudit();
+    }
+
     match /branches/{branchId} {
       allow read: if isApproved();
       allow write: if isAdmin();
