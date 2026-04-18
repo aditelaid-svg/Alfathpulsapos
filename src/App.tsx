@@ -114,7 +114,7 @@ export default function App() {
   const [posScannerInput, setPosScannerInput] = useState('');
   const [cart, setCart] = useState<any[]>([]);
   const [posStatus, setPosStatus] = useState({ message: '', type: 'info' });
-  const [showCameraScanner, setShowCameraScanner] = useState<'stock' | 'pos' | 'stock-initial' | null>(null);
+  const [showCameraScanner, setShowCameraScanner] = useState<'stock' | 'pos' | 'stock-initial' | 'audit' | null>(null);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [transfers, setTransfers] = useState<any[]>([]);
   const [disposals, setDisposals] = useState<any[]>([]);
@@ -896,6 +896,45 @@ export default function App() {
       setTimeout(() => setPosStatus({ message: '', type: 'info' }), 3000);
     } catch (error: any) {
       handleFirestoreError(error, OperationType.UPDATE, `products/${viewState.product.id}/variants/${viewState.variant.id}`);
+    }
+  };
+
+  const handleAuditScan = async (sn: string) => {
+    try {
+      // Cari SN di seluruh cabang (Collection Group)
+      const invQuery = query(collectionGroup(db, 'inventory'), where('sns', 'array-contains', sn));
+      const invSnap = await getDocs(invQuery);
+
+      if (invSnap.empty) {
+        setConfirmModal({
+          show: true,
+          title: "SN Tidak Ditemukan",
+          message: `Serial Number ${sn} tidak terdaftar di cabang manapun.`,
+          confirmText: "Tutup",
+          onConfirm: () => setConfirmModal(prev => ({ ...prev, show: false }))
+        });
+        return;
+      }
+
+      // Jika ditemukan
+      const itemData = invSnap.docs[0].data();
+      const product = products.find(p => p.id === itemData.productId);
+      const variant = product?.variants.find((v: any) => v.id === itemData.variantId);
+
+      if (product && variant) {
+        setViewState({
+           category: product.category,
+           provider: product.provider,
+           product: product,
+           variant: variant
+        });
+        setPosStatus({ message: `Ditemukan: ${product.name} - ${variant.name}`, type: 'success' });
+        setTimeout(() => setPosStatus({ message: '', type: 'info' }), 3000);
+      }
+      
+      setShowCameraScanner(null);
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.GET, 'inventory_search');
     }
   };
 
@@ -3174,7 +3213,7 @@ export default function App() {
       {/* Custom Confirmation Modal */}
       {showCameraScanner && (
         <CameraScanner 
-          title={showCameraScanner === 'stock' ? 'Input Stok SN' : showCameraScanner === 'stock-initial' ? 'Scan SN Awal' : 'Scan Kasir POS'}
+          title={showCameraScanner === 'stock' ? 'Input Stok SN' : showCameraScanner === 'stock-initial' ? 'Scan SN Awal' : showCameraScanner === 'audit' ? 'Audit Barang' : 'Scan Kasir POS'}
           onClose={() => setShowCameraScanner(null)}
           onScan={async (sn) => {
             if (showCameraScanner === 'stock-initial') {
@@ -3201,6 +3240,8 @@ export default function App() {
                  setPosStatus({ message: `SN ${sn} sudah ada!`, type: 'error' });
                  setTimeout(() => setPosStatus({ message: '', type: 'info' }), 2000);
                }
+            } else if (showCameraScanner === 'audit') {
+              handleAuditScan(sn);
             } else {
               // POS Mode
               setPosScannerInput(sn);
@@ -3572,6 +3613,17 @@ export default function App() {
           </div>
         </div>
       )}
+      {/* Floating Audit Scanner for Auditors */}
+      {(userData?.role === 'audit' || userData?.role === 'admin') && activeMenu === 'dashboard' && !showCameraScanner && (
+        <button 
+          onClick={() => setShowCameraScanner('audit')}
+          className="fixed bottom-24 right-6 z-50 w-16 h-16 bg-accent-blue rounded-full shadow-2xl flex items-center justify-center text-gray-900 shadow-accent-blue/40 border-4 border-black/40 active:scale-90 transition-all hover:scale-110"
+          title="Scan Audit Barang"
+        >
+          <QrCode size={32} />
+        </button>
+      )}
+
     </div>
   );
 }
