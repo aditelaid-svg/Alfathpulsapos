@@ -83,12 +83,37 @@ export default function App() {
   const [editVariantName, setEditVariantName] = useState('');
 
   const filteredProducts = products.filter(p => {
-    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          p.provider.toLowerCase().includes(searchQuery.toLowerCase());
+    const searchLower = searchQuery.toLowerCase();
+    
+    // Search in Product fields
+    const productMatches = p.name.toLowerCase().includes(searchLower) || 
+                          p.provider.toLowerCase().includes(searchLower);
+    
+    // Search in Variant fields
+    const variantMatches = p.variants?.some((v: any) => 
+      v.name.toLowerCase().includes(searchLower) || 
+      (v.barcode && v.barcode.toLowerCase().includes(searchLower))
+    ) || false;
+
+    const matchesSearch = productMatches || variantMatches;
     const matchesCategory = p.category === selectedCategory;
     const matchesProvider = filterProvider ? p.provider === filterProvider : true;
     return matchesSearch && matchesCategory && matchesProvider;
   });
+
+  // Sync editPrice when editor opens
+  useEffect(() => {
+    if (isEditingPrice && viewState.product && viewState.variant) {
+      setEditPrice({
+        productName: viewState.product.name,
+        variantName: viewState.variant.name,
+        modalPrice: viewState.variant.modalPrice || 0,
+        sellingPrice: viewState.variant.sellingPrice || 0,
+        minStock: viewState.variant.minStock || 5,
+        barcode: viewState.variant.barcode || ''
+      });
+    }
+  }, [isEditingPrice]); // Only run when opening the editor
 
   const providers = Array.from(new Set(products.filter(p => p.category === selectedCategory).map(p => p.provider))) as string[];
   
@@ -2361,7 +2386,7 @@ export default function App() {
                         </>
                       ) : (
                         <>
-                          <div className="p-4 bg-white/5 rounded-2xl border border-white/5 group relative hover:border-accent-blue/30 transition-all cursor-pointer" onClick={() => {
+                              <div className="p-4 bg-white/5 rounded-2xl border border-white/5 group relative hover:border-accent-blue/30 transition-all cursor-pointer" onClick={() => {
                                   if (userData?.role === 'admin' || userData?.role === 'audit') {
                                     setEditPrice({
                                       productName: viewState.product.name,
@@ -2384,7 +2409,7 @@ export default function App() {
                                )}
                             </div>
                           </div>
-                          <div className="p-4 bg-white/5 rounded-2xl border border-white/5 group relative hover:border-green-500/30 transition-all cursor-pointer" onClick={() => {
+                              <div className="p-4 bg-white/5 rounded-2xl border border-white/5 group relative hover:border-green-500/30 transition-all cursor-pointer" onClick={() => {
                                   if (userData?.role === 'admin' || userData?.role === 'audit') {
                                     setEditPrice({
                                       productName: viewState.product.name,
