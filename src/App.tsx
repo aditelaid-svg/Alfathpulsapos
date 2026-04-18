@@ -8,7 +8,7 @@ import * as XLSX from 'xlsx';
 import { db, auth } from './firebase';
 import { collection, onSnapshot, addDoc, serverTimestamp, doc, setDoc, updateDoc, getDoc, deleteDoc, query, where, collectionGroup, getDocs } from 'firebase/firestore';
 import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
-import { Sun, Moon, LayoutDashboard, ShoppingCart, Package, Store, Settings, Plus, ChevronRight, Hash, QrCode, UserCheck, ShieldAlert, MapPin, Trash2, Camera, X, Sparkles, ArrowLeftRight, RotateCcw, FileText, History, LogOut, TrendingUp, Wallet, PieChart, Activity, Coins, FileSpreadsheet, AlertTriangle } from 'lucide-react';
+import { Sun, Moon, LayoutDashboard, ShoppingCart, Package, Store, Settings, Plus, ChevronRight, Hash, QrCode, UserCheck, ShieldAlert, MapPin, Trash2, Camera, X, Sparkles, ArrowLeftRight, RotateCcw, FileText, History, LogOut, TrendingUp, Wallet, PieChart, Activity, Coins, FileSpreadsheet, AlertTriangle, Pencil } from 'lucide-react';
 import CameraScanner from './components/CameraScanner';
 
 enum OperationType {
@@ -2093,43 +2093,45 @@ export default function App() {
                         </>
                       ) : (
                         <>
-                          <div className="p-4 bg-white/5 rounded-2xl border border-white/5 group relative">
+                          <div className="p-4 bg-white/5 rounded-2xl border border-white/5 group relative hover:border-accent-blue/30 transition-all cursor-pointer" onClick={() => {
+                                  if (userData?.role === 'admin') {
+                                    setEditPrice({
+                                      modalPrice: viewState.variant.modalPrice || 0,
+                                      sellingPrice: viewState.variant.sellingPrice || 0,
+                                      minStock: viewState.variant.minStock || 5
+                                    });
+                                    setIsEditingPrice(true);
+                                  }
+                                }}>
                             <p className="text-[8px] text-text-dim uppercase tracking-widest">Harga Modal</p>
-                            <p className="text-lg font-bold">{formatRupiah(viewState.variant.modalPrice || 0)}</p>
-                            {userData?.role === 'admin' && (
-                              <button 
-                                onClick={() => {
-                                  setEditPrice({
-                                    modalPrice: viewState.variant.modalPrice || 0,
-                                    sellingPrice: viewState.variant.sellingPrice || 0,
-                                    minStock: viewState.variant.minStock || 5
-                                  });
-                                  setIsEditingPrice(true);
-                                }}
-                                className="absolute top-2 right-2 p-1.5 bg-accent-blue/10 text-accent-blue rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
-                              >
-                                <Settings size={12} />
-                              </button>
-                            )}
+                            <div className="flex justify-between items-end">
+                               <p className="text-lg font-bold">{formatRupiah(viewState.variant.modalPrice || 0)}</p>
+                               {userData?.role === 'admin' && (
+                                 <div className="p-1.5 bg-accent-blue/10 text-accent-blue rounded-lg">
+                                   <Pencil size={12} />
+                                 </div>
+                               )}
+                            </div>
                           </div>
-                          <div className="p-4 bg-white/5 rounded-2xl border border-white/5 group relative">
+                          <div className="p-4 bg-white/5 rounded-2xl border border-white/5 group relative hover:border-green-500/30 transition-all cursor-pointer" onClick={() => {
+                                  if (userData?.role === 'admin') {
+                                    setEditPrice({
+                                      modalPrice: viewState.variant.modalPrice || 0,
+                                      sellingPrice: viewState.variant.sellingPrice || 0,
+                                      minStock: viewState.variant.minStock || 5
+                                    });
+                                    setIsEditingPrice(true);
+                                  }
+                                }}>
                             <p className="text-[8px] text-text-dim uppercase tracking-widest">Harga Jual</p>
-                            <p className="text-lg font-bold text-green-400">{formatRupiah(viewState.variant.sellingPrice || 0)}</p>
-                            {userData?.role === 'admin' && (
-                              <button 
-                                onClick={() => {
-                                  setEditPrice({
-                                    modalPrice: viewState.variant.modalPrice || 0,
-                                    sellingPrice: viewState.variant.sellingPrice || 0,
-                                    minStock: viewState.variant.minStock || 5
-                                  });
-                                  setIsEditingPrice(true);
-                                }}
-                                className="absolute top-2 right-2 p-1.5 bg-accent-blue/10 text-accent-blue rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
-                              >
-                                <Settings size={12} />
-                              </button>
-                            )}
+                            <div className="flex justify-between items-end">
+                               <p className="text-lg font-bold text-green-400">{formatRupiah(viewState.variant.sellingPrice || 0)}</p>
+                               {userData?.role === 'admin' && (
+                                 <div className="p-1.5 bg-green-500/10 text-green-500 rounded-lg">
+                                   <Pencil size={12} />
+                                 </div>
+                               )}
+                            </div>
                           </div>
                         </>
                       )}
