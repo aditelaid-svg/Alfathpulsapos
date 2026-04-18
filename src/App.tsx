@@ -76,7 +76,7 @@ export default function App() {
   const [filterProvider, setFilterProvider] = useState<string | null>(null);
 
   const [isEditingPrice, setIsEditingPrice] = useState(false);
-  const [editPrice, setEditPrice] = useState({ modalPrice: 0, sellingPrice: 0, minStock: 5, barcode: '' });
+  const [editPrice, setEditPrice] = useState({ productName: '', variantName: '', modalPrice: 0, sellingPrice: 0, minStock: 5, barcode: '' });
   const [isEditingProductName, setIsEditingProductName] = useState(false);
   const [editProductName, setEditProductName] = useState('');
   const [isEditingVariantName, setIsEditingVariantName] = useState(false);
@@ -844,6 +844,7 @@ export default function App() {
         if (v.id === viewState.variant.id) {
           return {
             ...v,
+            name: editPrice.variantName || v.name,
             modalPrice: editPrice.modalPrice,
             sellingPrice: editPrice.sellingPrice,
             minStock: editPrice.minStock,
@@ -853,13 +854,21 @@ export default function App() {
         return v;
       });
       
-      await updateDoc(productRef, { variants: updatedVariants });
+      await updateDoc(productRef, { 
+        name: editPrice.productName || productData.name,
+        variants: updatedVariants 
+      });
       
       // Update local viewState
       setViewState({
         ...viewState,
+        product: {
+          ...viewState.product,
+          name: editPrice.productName || viewState.product.name
+        },
         variant: {
           ...viewState.variant,
+          name: editPrice.variantName || viewState.variant.name,
           modalPrice: editPrice.modalPrice,
           sellingPrice: editPrice.sellingPrice,
           minStock: editPrice.minStock,
@@ -868,7 +877,7 @@ export default function App() {
       });
       
       setIsEditingPrice(false);
-      setPosStatus({ message: "Harga Berhasil Diperbarui!", type: 'success' });
+      setPosStatus({ message: "Data Produk Berhasil Diperbarui!", type: 'success' });
       setTimeout(() => setPosStatus({ message: '', type: 'info' }), 3000);
     } catch (error: any) {
       handleFirestoreError(error, OperationType.UPDATE, `products/${viewState.product.id}`);
@@ -2265,6 +2274,29 @@ export default function App() {
                     <div className="grid grid-cols-2 gap-4">
                       {isEditingPrice ? (
                         <>
+                          <div className="col-span-2 space-y-3 bg-accent-blue/5 p-4 rounded-3xl border border-accent-blue/10">
+                            <div className="space-y-1">
+                              <p className="text-[8px] text-accent-blue font-black uppercase tracking-widest ml-1">Nama Grup Produk</p>
+                              <input 
+                                type="text"
+                                className="w-full bg-black/40 border border-white/10 p-3 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-accent-blue"
+                                value={editPrice.productName}
+                                onChange={e => setEditPrice({...editPrice, productName: e.target.value})}
+                                placeholder="Edit Nama Grup..."
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-[8px] text-accent-blue font-black uppercase tracking-widest ml-1">Nama Tipe / Model</p>
+                              <input 
+                                type="text"
+                                className="w-full bg-black/40 border border-white/10 p-3 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-accent-blue"
+                                value={editPrice.variantName}
+                                onChange={e => setEditPrice({...editPrice, variantName: e.target.value})}
+                                placeholder="Edit Nama Tipe..."
+                              />
+                            </div>
+                          </div>
+
                           <div className="p-4 bg-white/5 rounded-2xl border border-accent-blue/30 space-y-2">
                             <p className="text-[8px] text-text-dim uppercase tracking-widest">Harga Modal (Beli)</p>
                             <input 
@@ -2332,6 +2364,8 @@ export default function App() {
                           <div className="p-4 bg-white/5 rounded-2xl border border-white/5 group relative hover:border-accent-blue/30 transition-all cursor-pointer" onClick={() => {
                                   if (userData?.role === 'admin' || userData?.role === 'audit') {
                                     setEditPrice({
+                                      productName: viewState.product.name,
+                                      variantName: viewState.variant.name,
                                       modalPrice: viewState.variant.modalPrice || 0,
                                       sellingPrice: viewState.variant.sellingPrice || 0,
                                       minStock: viewState.variant.minStock || 5,
@@ -2353,6 +2387,8 @@ export default function App() {
                           <div className="p-4 bg-white/5 rounded-2xl border border-white/5 group relative hover:border-green-500/30 transition-all cursor-pointer" onClick={() => {
                                   if (userData?.role === 'admin' || userData?.role === 'audit') {
                                     setEditPrice({
+                                      productName: viewState.product.name,
+                                      variantName: viewState.variant.name,
                                       modalPrice: viewState.variant.modalPrice || 0,
                                       sellingPrice: viewState.variant.sellingPrice || 0,
                                       minStock: viewState.variant.minStock || 5,
