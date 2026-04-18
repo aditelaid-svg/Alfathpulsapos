@@ -150,6 +150,8 @@ export default function App() {
   const [rangeSNConfig, setRangeSNConfig] = useState({ start: '', end: '' });
   const [singleSNInput, setSingleSNInput] = useState('');
   const [posScannerInput, setPosScannerInput] = useState('');
+  const [posSearchQuery, setPosSearchQuery] = useState('');
+  const [auditSearchQuery, setAuditSearchQuery] = useState('');
   const [cart, setCart] = useState<any[]>([]);
   const [posStatus, setPosStatus] = useState({ message: '', type: 'info' });
   const [showCameraScanner, setShowCameraScanner] = useState<'stock' | 'pos' | 'stock-initial' | 'audit' | 'barcode-master' | null>(null);
@@ -2935,15 +2937,21 @@ export default function App() {
                   <QrCode size={80} />
                </div>
                <div className="space-y-1 relative z-10">
-                 <p className="text-[10px] font-bold text-accent-blue uppercase tracking-widest">Scan QR / Barcode Produk</p>
-                 <div className="flex gap-2">
+                 <p className="text-[10px] font-bold text-accent-blue uppercase tracking-widest">Pencarian / Scan Kode Produk</p>
+                 <div className="flex gap-2 relative">
                    <input 
                     autoFocus
-                    placeholder="Klik di sini & SCAN SN..."
+                    placeholder="Ketik Nama / Type / Scan SN..."
                     className="flex-1 bg-black/40 border-2 border-accent-blue/50 p-3 rounded-2xl text-base font-mono placeholder:opacity-30 focus:outline-none focus:border-accent-blue shadow-inner"
-                    value={posScannerInput}
-                    onChange={e => setPosScannerInput(e.target.value)}
-                    onKeyDown={handlePOSScan}
+                    value={posSearchQuery}
+                    onChange={e => setPosSearchQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        setPosScannerInput(posSearchQuery);
+                        handlePOSScan({ ...e, key: 'Enter', target: { value: posSearchQuery } } as any);
+                        setPosSearchQuery('');
+                      }
+                    }}
                    />
                    <button 
                     onClick={() => setShowCameraScanner('pos')}
@@ -2951,6 +2959,73 @@ export default function App() {
                    >
                      <Camera size={32} />
                    </button>
+
+                   {/* Real-time Results POS */}
+                   {posSearchQuery.trim().length >= 2 && (
+                     <div className="absolute top-full left-0 right-0 mt-2 z-50 glass-card bg-gray-950 border border-white/20 p-2 max-h-60 overflow-y-auto shadow-2xl animate-in fade-in slide-in-from-top-2">
+                       {products
+                         .flatMap(p => (p.variants || []).map((v: any) => ({ ...v, pName: p.name, pProvider: p.provider, pCategory: p.category, pId: p.id })))
+                         .filter(v => 
+                           v.pName.toLowerCase().includes(posSearchQuery.toLowerCase()) || 
+                           v.name.toLowerCase().includes(posSearchQuery.toLowerCase()) ||
+                           (v.barcode && v.barcode.toLowerCase().includes(posSearchQuery.toLowerCase()))
+                         )
+                         .slice(0, 10)
+                         .map((v, i) => (
+                           <button 
+                             key={`${v.id}-${i}`}
+                             onClick={() => {
+                               const invKey = `${v.pId}_${v.id}`;
+                               const currentInv = branchInventory[invKey];
+                               if (currentInv && currentInv.sns?.length > 0) {
+                                 const sn = currentInv.sns[0];
+                                 setCart(prev => [...prev, {
+                                   sn: sn,
+                                   productId: v.pId,
+                                   variantId: v.id,
+                                   name: v.pName,
+                                   variantName: v.name,
+                                   price: v.sellingPrice,
+                                   modal: v.modalPrice || 0,
+                                   category: v.pCategory,
+                                   provider: v.pProvider
+                                 }]);
+                                 setPosStatus({ message: `Ditambahkan: ${v.pName} ${v.name}`, type: 'success' });
+                                 setPosSearchQuery('');
+                               } else {
+                                 setPosStatus({ message: `Stok Kosong!`, type: 'error' });
+                               }
+                             }}
+                             className="w-full text-left p-3 hover:bg-white/5 rounded-xl border-b border-white/5 last:border-0"
+                           >
+                             <div className="flex justify-between items-center">
+                               <div>
+                                 <p className="text-[10px] font-bold text-accent-blue uppercase">{v.pProvider}</p>
+                                 <p className="text-xs font-bold">{v.pName} - {v.name}</p>
+                                 {v.barcode && <p className="text-[9px] text-text-dim mt-0.5">Barcode: {v.barcode}</p>}
+                               </div>
+                               <div className="text-right">
+                                 <p className="text-xs font-black text-white">{formatRupiah(v.sellingPrice)}</p>
+                                 <p className={`text-[8px] font-bold uppercase ${(branchInventory[`${v.pId}_${v.id}`]?.sns?.length || 0) > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                   Stok: {branchInventory[`${v.pId}_${v.id}`]?.sns?.length || 0}
+                                 </p>
+                               </div>
+                             </div>
+                           </button>
+                         ))
+                       }
+                       {products
+                         .flatMap(p => (p.variants || []).map((v: any) => ({ ...v, pName: p.name, pProvider: p.provider, pCategory: p.category, pId: p.id })))
+                         .filter(v => 
+                           v.pName.toLowerCase().includes(posSearchQuery.toLowerCase()) || 
+                           v.name.toLowerCase().includes(posSearchQuery.toLowerCase()) ||
+                           (v.barcode && v.barcode.toLowerCase().includes(posSearchQuery.toLowerCase()))
+                         ).length === 0 && (
+                           <p className="text-center p-4 text-[10px] text-text-dim italic">Produk tidak ditemukan...</p>
+                         )
+                       }
+                     </div>
+                   )}
                  </div>
                  <p className="text-[8px] text-text-dim italic mt-2 text-center">Scanner Bluetooth otomatis menekan ENTER setelah scan.</p>
                </div>
@@ -3223,27 +3298,27 @@ export default function App() {
             <div className="glass-card p-6 space-y-6 border-accent-blue/30 relative overflow-hidden group">
               <div className="absolute -top-10 -right-10 w-32 h-32 bg-accent-blue/10 rounded-full blur-3xl group-hover:bg-accent-blue/20 transition-all"></div>
               
-              <div className="text-center space-y-2">
+              <div className="text-center space-y-4">
                 <div className="w-16 h-16 bg-accent-blue/10 rounded-2xl flex items-center justify-center mx-auto text-accent-blue mb-4">
                   <QrCode size={32} />
                 </div>
                 <h3 className="text-sm font-black uppercase tracking-widest">Scan atau Input Kode</h3>
                 <p className="text-[10px] text-text-dim uppercase font-bold">Gunakan Barcode Master atau SN Unit</p>
-              </div>
-
-              <div className="space-y-4">
-                <div className="relative">
+                
+                <div className="relative text-left">
                   <input 
                     type="text"
                     autoFocus
                     placeholder="Scan / Ketik Kode Produk..."
                     className="w-full bg-black/40 border border-white/10 p-4 pr-12 rounded-2xl text-xs font-mono focus:outline-none focus:border-accent-blue/50 text-white"
+                    value={auditSearchQuery}
+                    onChange={(e) => setAuditSearchQuery(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         const val = (e.target as HTMLInputElement).value;
                         if (val.trim()) {
                           handleAuditScan(val.trim());
-                          (e.target as HTMLInputElement).value = '';
+                          setAuditSearchQuery('');
                         }
                       }
                     }}
@@ -3251,15 +3326,59 @@ export default function App() {
                   <div className="absolute right-4 top-1/2 -translate-y-1/2 text-accent-blue/50">
                     <Search size={16} />
                   </div>
-                </div>
 
-                <button 
-                  onClick={() => setShowCameraScanner('audit')}
-                  className="w-full py-4 bg-accent-blue text-gray-900 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-lg shadow-accent-blue/20 active:scale-95 transition flex items-center justify-center gap-3"
-                >
-                  <Camera size={16} /> Buka Kamera Scanner
-                </button>
+                  {/* Real-time Results Audit */}
+                  {auditSearchQuery.trim().length >= 2 && (
+                    <div className="absolute top-full left-0 right-0 mt-2 z-50 glass-card bg-gray-950 border border-white/20 p-2 max-h-60 overflow-y-auto shadow-2xl animate-in fade-in slide-in-from-top-2">
+                      {products
+                        .flatMap(p => (p.variants || []).map((v: any) => ({ ...v, pName: p.name, pProvider: p.provider, pCategory: p.category, pId: p.id, productFull: p })))
+                        .filter(v => 
+                          v.pName.toLowerCase().includes(auditSearchQuery.toLowerCase()) || 
+                          v.name.toLowerCase().includes(auditSearchQuery.toLowerCase()) ||
+                          (v.barcode && v.barcode.toLowerCase().includes(auditSearchQuery.toLowerCase()))
+                        )
+                        .slice(0, 10)
+                        .map((v, i) => (
+                          <button 
+                            key={`${v.id}-${i}`}
+                            onClick={() => {
+                              setViewState({
+                                category: v.pCategory,
+                                provider: v.pProvider,
+                                product: v.productFull,
+                                variant: v
+                              });
+                              setActiveMenu('products');
+                              setAuditSearchQuery('');
+                            }}
+                            className="w-full text-left p-3 hover:bg-white/5 rounded-xl border-b border-white/5 last:border-0"
+                          >
+                            <div className="flex justify-between items-center">
+                              <div>
+                                <p className="text-[10px] font-bold text-accent-blue uppercase">{v.pProvider}</p>
+                                <p className="text-xs font-bold">{v.pName} - {v.name}</p>
+                                {v.barcode && <p className="text-[9px] text-text-dim mt-0.5">Master: {v.barcode}</p>}
+                              </div>
+                              <div className="text-right">
+                                <p className={`text-[8px] font-bold uppercase ${(branchInventory[`${v.pId}_${v.id}`]?.sns?.length || 0) > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                  Stok: {branchInventory[`${v.pId}_${v.id}`]?.sns?.length || 0}
+                                </p>
+                              </div>
+                            </div>
+                          </button>
+                        ))
+                      }
+                    </div>
+                  )}
+                </div>
               </div>
+
+              <button 
+                onClick={() => setShowCameraScanner('audit')}
+                className="w-full py-4 bg-accent-blue text-gray-900 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-lg shadow-accent-blue/20 active:scale-95 transition flex items-center justify-center gap-3"
+              >
+                <Camera size={16} /> Buka Kamera Scanner
+              </button>
             </div>
 
             <div className="space-y-4">
