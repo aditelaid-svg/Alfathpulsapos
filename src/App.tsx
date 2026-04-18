@@ -8,7 +8,7 @@ import * as XLSX from 'xlsx';
 import { db, auth } from './firebase';
 import { collection, onSnapshot, addDoc, serverTimestamp, doc, setDoc, updateDoc, getDoc, deleteDoc, query, where, collectionGroup, getDocs } from 'firebase/firestore';
 import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
-import { Sun, Moon, LayoutDashboard, ShoppingCart, Package, Store, Settings, Plus, ChevronRight, Hash, QrCode, UserCheck, ShieldAlert, MapPin, Trash2, Camera, X, Sparkles, ArrowLeftRight, RotateCcw, FileText, History, LogOut, TrendingUp, Wallet, PieChart, Activity, Coins, FileSpreadsheet, AlertTriangle, Pencil } from 'lucide-react';
+import { Sun, Moon, LayoutDashboard, ShoppingCart, Package, Store, Settings, Plus, ChevronRight, Hash, QrCode, UserCheck, ShieldAlert, MapPin, Trash2, Camera, X, Sparkles, ArrowLeftRight, RotateCcw, FileText, History, LogOut, TrendingUp, Wallet, PieChart, Activity, Coins, FileSpreadsheet, AlertTriangle, Pencil, ShieldCheck, Search } from 'lucide-react';
 import CameraScanner from './components/CameraScanner';
 
 enum OperationType {
@@ -83,21 +83,34 @@ export default function App() {
   const [editVariantName, setEditVariantName] = useState('');
 
   const filteredProducts = products.filter(p => {
-    const searchLower = searchQuery.toLowerCase();
+    const searchLower = searchQuery.trim().toLowerCase();
     
+    // If no search, filter by category & provider
+    if (!searchLower) {
+      const matchesCategory = p.category === selectedCategory;
+      const matchesProvider = filterProvider ? p.provider === filterProvider : true;
+      return matchesCategory && matchesProvider;
+    }
+
     // Search in Product fields
     const productMatches = p.name.toLowerCase().includes(searchLower) || 
                           p.provider.toLowerCase().includes(searchLower);
     
-    // Search in Variant fields
+    // Search in Variant fields (including Barcode)
     const variantMatches = p.variants?.some((v: any) => 
       v.name.toLowerCase().includes(searchLower) || 
-      (v.barcode && v.barcode.toLowerCase().includes(searchLower))
+      (v.barcode && v.barcode.trim().toLowerCase().includes(searchLower))
     ) || false;
+
+    // IF EXACT BARCODE MATCH -> Ignore category (Global Search)
+    const exactBarcodeMatch = p.variants?.some((v: any) => v.barcode && v.barcode.trim().toLowerCase() === searchLower);
+
+    if (exactBarcodeMatch) return true;
 
     const matchesSearch = productMatches || variantMatches;
     const matchesCategory = p.category === selectedCategory;
     const matchesProvider = filterProvider ? p.provider === filterProvider : true;
+    
     return matchesSearch && matchesCategory && matchesProvider;
   });
 
@@ -653,49 +666,52 @@ export default function App() {
 
       let pId;
 
-      if (existingProduct) {
-        // Check if variant with same name already exists in this group
-        const isDuplicateVariant = existingProduct.variants?.some((v: any) => v.name?.toLowerCase() === variantName.toLowerCase());
-        if (isDuplicateVariant) {
-          setConfirmModal({
-            show: true,
-            title: "Tipe Duplikat",
-            message: `Tipe "${variantName}" sudah ada di produk ini. Silakan gunakan nama tipe lain.`,
-            onConfirm: () => setConfirmModal(prev => ({ ...prev, show: false }))
-          });
-          return;
-        }
-
-        // Add variant to existing product group
-        pId = existingProduct.id;
-        const currentVariants = existingProduct.variants || [];
-        await updateDoc(doc(db, 'products', pId), {
-          variants: [...currentVariants, { 
-            ...newProduct.variant, 
-            name: variantName, 
-            modalPrice, 
-            sellingPrice,
-            id: variantId 
-          }]
+    if (existingProduct) {
+      // Check if variant with same name already exists in this group
+      const vNameNormalized = variantName.trim();
+      const isDuplicateVariant = existingProduct.variants?.some((v: any) => v.name?.trim().toLowerCase() === vNameNormalized.toLowerCase());
+      if (isDuplicateVariant) {
+        setConfirmModal({
+          show: true,
+          title: "Tipe Duplikat",
+          message: `Tipe "${vNameNormalized}" sudah ada di produk ini. Silakan gunakan nama tipe lain.`,
+          onConfirm: () => setConfirmModal(prev => ({ ...prev, show: false }))
         });
-      } else {
-        // Create a new product group
-        const newDocRef = await addDoc(collection(db, 'products'), {
-          name: trimmedName,
-          provider: newProduct.provider,
-          category: newProduct.category,
-          variants: [{ 
-            ...newProduct.variant, 
-            name: variantName, 
-            modalPrice, 
-            sellingPrice,
-            id: variantId 
-          }],
-          createdAt: serverTimestamp(),
-          createdBy: user?.uid || 'system'
-        });
-        pId = newDocRef.id;
+        return;
       }
+
+      // Add variant to existing product group
+      pId = existingProduct.id;
+      const currentVariants = existingProduct.variants || [];
+      await updateDoc(doc(db, 'products', pId), {
+        variants: [...currentVariants, { 
+          ...newProduct.variant, 
+          name: vNameNormalized, 
+          modalPrice, 
+          sellingPrice,
+          barcode: newProduct.variant.barcode?.trim() || '',
+          id: variantId 
+        }]
+      });
+    } else {
+      // Create a new product group
+      const newDocRef = await addDoc(collection(db, 'products'), {
+        name: trimmedName,
+        provider: newProduct.provider,
+        category: newProduct.category,
+        variants: [{ 
+          ...newProduct.variant, 
+          name: variantName.trim(), 
+          modalPrice, 
+          sellingPrice,
+          barcode: newProduct.variant.barcode?.trim() || '',
+          id: variantId 
+        }],
+        createdAt: serverTimestamp(),
+        createdBy: user?.uid || 'system'
+      });
+      pId = newDocRef.id;
+    }
 
       // Handle Initial Stock if provided
       if (selectedBranch && (newProduct.sn || newProduct.qty > 0)) {
@@ -869,18 +885,18 @@ export default function App() {
         if (v.id === viewState.variant.id) {
           return {
             ...v,
-            name: editPrice.variantName || v.name,
+            name: editPrice.variantName?.trim() || v.name,
             modalPrice: editPrice.modalPrice,
             sellingPrice: editPrice.sellingPrice,
             minStock: editPrice.minStock,
-            barcode: editPrice.barcode
+            barcode: editPrice.barcode?.trim() || ''
           };
         }
         return v;
       });
       
       await updateDoc(productRef, { 
-        name: editPrice.productName || productData.name,
+        name: editPrice.productName?.trim() || productData.name,
         variants: updatedVariants 
       });
       
@@ -889,15 +905,15 @@ export default function App() {
         ...viewState,
         product: {
           ...viewState.product,
-          name: editPrice.productName || viewState.product.name
+          name: editPrice.productName?.trim() || viewState.product.name
         },
         variant: {
           ...viewState.variant,
-          name: editPrice.variantName || viewState.variant.name,
+          name: editPrice.variantName?.trim() || viewState.variant.name,
           modalPrice: editPrice.modalPrice,
           sellingPrice: editPrice.sellingPrice,
           minStock: editPrice.minStock,
-          barcode: editPrice.barcode
+          barcode: editPrice.barcode?.trim() || ''
         }
       });
       
@@ -968,7 +984,8 @@ export default function App() {
     }
   };
 
-  const handleAuditScan = async (sn: string) => {
+  const handleAuditScan = async (snInput: string) => {
+    const sn = snInput.trim();
     try {
       // 1. Cari di Inventory (Stok Aktif)
       const invQuery = query(collectionGroup(db, 'inventory'), where('sns', 'array-contains', sn));
@@ -986,6 +1003,7 @@ export default function App() {
              product: product,
              variant: variant
           });
+          setActiveMenu('products'); // Jump to products to show the modal
           setPosStatus({ message: `Ditemukan di Inventaris: ${product.name}`, type: 'success' });
           setTimeout(() => setPosStatus({ message: '', type: 'info' }), 3000);
           setShowCameraScanner(null);
@@ -994,15 +1012,16 @@ export default function App() {
       }
 
       // 2. Jika tidak ada di stok, cari berdasarkan "Kunci SN / Barcode Master" (Khusus Aksesoris/Voucher)
-      const productWithMaster = products.find(p => p.variants?.some((v: any) => v.barcode === sn));
+      const productWithMaster = products.find(p => p.variants?.some((v: any) => v.barcode?.trim() === sn));
       if (productWithMaster) {
-        const variant = productWithMaster.variants.find((v: any) => v.barcode === sn);
+        const variant = productWithMaster.variants.find((v: any) => v.barcode?.trim() === sn);
         setViewState({
           category: productWithMaster.category,
           provider: productWithMaster.provider,
           product: productWithMaster,
           variant: variant
         });
+        setActiveMenu('products'); // Jump to products to show the modal
         setPosStatus({ message: `Ditemukan via Kunci SN: ${productWithMaster.name}`, type: 'success' });
         setTimeout(() => setPosStatus({ message: '', type: 'info' }), 3000);
         setShowCameraScanner(null);
@@ -2762,12 +2781,11 @@ export default function App() {
             const sn = posScannerInput.trim();
             setPosScannerInput('');
 
-            // Search in active branch inventory
+            // Search in active branch inventory (Direct SN match)
             let found = false;
             for (const key in branchInventory) {
               const inv = branchInventory[key];
               if (inv.sns.includes(sn)) {
-                // Get product details
                 const product = products.find(p => p.id === inv.productId);
                 if (product) {
                   const variant = product.variants.find((v: any) => v.id === inv.variantId);
@@ -2791,7 +2809,42 @@ export default function App() {
                 }
               }
             }
-            if (!found) setPosStatus({ message: `SN ${sn} tidak ditemukan di stok cabang ini!`, type: 'error' });
+
+            // If not found as unique SN, search as Barcode Master (Kunci SN)
+            if (!found) {
+              for (const p of products) {
+                const variantFound = p.variants?.find((v: any) => v.barcode === sn);
+                if (variantFound) {
+                  const invKey = `${p.id}_${variantFound.id}`;
+                  const currentInv = branchInventory[invKey];
+                  
+                  if (currentInv && currentInv.sns?.length > 0) {
+                    // Pick the first available SN for this model
+                    const pickedSN = currentInv.sns[0];
+                    setCart(prev => [...prev, {
+                      sn: pickedSN,
+                      productId: p.id,
+                      variantId: variantFound.id,
+                      name: p.name,
+                      variantName: variantFound.name,
+                      price: variantFound.sellingPrice,
+                      modal: variantFound.modalPrice || 0,
+                      category: p.category,
+                      provider: p.provider
+                    }]);
+                    const displayName = p.category === 'aksesoris' ? `${p.provider} ${variantFound.name} ${p.name}` : `${p.name} - ${variantFound.name}`;
+                    setPosStatus({ message: `Master Barcode Found: ${displayName}`, type: 'success' });
+                    found = true;
+                    break;
+                  } else {
+                    setPosStatus({ message: `Produk ditemukan, tapi Stok di cabang ini Kosong!`, type: 'error' });
+                    found = true; // Mark as found to avoid the generic "tidak ditemukan" message
+                    break;
+                  }
+                }
+              }
+            }
+            if (!found) setPosStatus({ message: `SN / Barcode Master ${sn} tidak ditemukan di stok cabang ini!`, type: 'error' });
           }
         };
 
@@ -3152,6 +3205,82 @@ export default function App() {
             </div>
           </div>
         );
+      case 'audit_center':
+        return (
+          <div className="space-y-6 pb-20">
+            <div className="flex justify-between items-center px-1">
+              <div>
+                <h2 className="text-xl font-black text-white tracking-widest uppercase flex items-center gap-2">
+                  <ShieldCheck className="text-accent-blue" /> Pusat Audit
+                </h2>
+                <p className="text-[10px] text-text-dim uppercase font-bold tracking-widest">Cek Stok & Validasi Inventaris</p>
+              </div>
+              <div className="text-[10px] bg-accent-blue/10 text-accent-blue px-3 py-1 rounded-full font-bold border border-accent-blue/20 uppercase tracking-widest">
+                {branches.find(b => b.id === selectedBranch)?.name || 'Pilih Cabang'}
+              </div>
+            </div>
+
+            <div className="glass-card p-6 space-y-6 border-accent-blue/30 relative overflow-hidden group">
+              <div className="absolute -top-10 -right-10 w-32 h-32 bg-accent-blue/10 rounded-full blur-3xl group-hover:bg-accent-blue/20 transition-all"></div>
+              
+              <div className="text-center space-y-2">
+                <div className="w-16 h-16 bg-accent-blue/10 rounded-2xl flex items-center justify-center mx-auto text-accent-blue mb-4">
+                  <QrCode size={32} />
+                </div>
+                <h3 className="text-sm font-black uppercase tracking-widest">Scan atau Input Kode</h3>
+                <p className="text-[10px] text-text-dim uppercase font-bold">Gunakan Barcode Master atau SN Unit</p>
+              </div>
+
+              <div className="space-y-4">
+                <div className="relative">
+                  <input 
+                    type="text"
+                    autoFocus
+                    placeholder="Scan / Ketik Kode Produk..."
+                    className="w-full bg-black/40 border border-white/10 p-4 pr-12 rounded-2xl text-xs font-mono focus:outline-none focus:border-accent-blue/50 text-white"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const val = (e.target as HTMLInputElement).value;
+                        if (val.trim()) {
+                          handleAuditScan(val.trim());
+                          (e.target as HTMLInputElement).value = '';
+                        }
+                      }
+                    }}
+                  />
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2 text-accent-blue/50">
+                    <Search size={16} />
+                  </div>
+                </div>
+
+                <button 
+                  onClick={() => setShowCameraScanner('audit')}
+                  className="w-full py-4 bg-accent-blue text-gray-900 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-lg shadow-accent-blue/20 active:scale-95 transition flex items-center justify-center gap-3"
+                >
+                  <Camera size={16} /> Buka Kamera Scanner
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <h4 className="text-[10px] font-bold text-text-dim uppercase tracking-widest px-1">Instruksi Audit</h4>
+              <div className="grid grid-cols-1 gap-3">
+                <div className="glass-card p-4 border-white/5 flex items-start gap-4">
+                  <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-accent-blue shrink-0">1</div>
+                  <p className="text-[10px] text-text-dim leading-relaxed">Pilih <b>Cabang</b> yang ingin diaudit melalui pilihan di menu Home atau Sistem.</p>
+                </div>
+                <div className="glass-card p-4 border-white/5 flex items-start gap-4">
+                  <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-accent-blue shrink-0">2</div>
+                  <p className="text-[10px] text-text-dim leading-relaxed"><b>Scan Barcode Master</b> untuk melihat informasi produk secara umum dan total stok di cabang ini.</p>
+                </div>
+                <div className="glass-card p-4 border-white/5 flex items-start gap-4">
+                  <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-accent-blue shrink-0">3</div>
+                  <p className="text-[10px] text-text-dim leading-relaxed"><b>Scan SN Spesifik</b> untuk memastikan unit tersebut benar-benar terdaftar di inventaris cabang.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
       case 'history':
         const filteredTransactions = transactions.filter(t => 
           userData?.role === 'admin' || userData?.role === 'audit' || t.branchId === userData?.branchId
@@ -3321,6 +3450,7 @@ export default function App() {
     
     if (userData.role === 'admin' || userData.role === 'audit') {
       items.push({ id: 'dashboard', label: 'Home', icon: LayoutDashboard });
+      items.push({ id: 'audit_center', label: 'Audit', icon: ShieldCheck });
       items.push({ id: 'restock', label: 'Restok', icon: AlertTriangle });
       if (userData.role === 'admin') {
         items.push({ id: 'reports', label: 'Laporan', icon: FileSpreadsheet });
@@ -3427,7 +3557,8 @@ export default function App() {
         <CameraScanner 
           title={showCameraScanner === 'stock' ? 'Input Stok SN' : showCameraScanner === 'stock-initial' ? 'Scan SN Awal' : showCameraScanner === 'audit' ? 'Audit Barang' : showCameraScanner === 'barcode-master' ? 'Scan Kunci SN Master' : 'Scan Kasir POS'}
           onClose={() => setShowCameraScanner(null)}
-          onScan={async (sn) => {
+          onScan={async (rawSn) => {
+            const sn = rawSn.trim();
             if (showCameraScanner === 'stock-initial') {
               setNewProduct(prev => ({ ...prev, sn }));
               setShowCameraScanner(null);
@@ -3474,36 +3605,74 @@ export default function App() {
             } else {
               // POS Mode
               setPosScannerInput(sn);
-              // Trigger scan logic (we need to mirror handlePOSScan logic)
+              // Trigger scan logic (Direct SN search first)
+              const trimmedSN = sn.trim();
               let found = false;
               for (const key in branchInventory) {
                 const inv = branchInventory[key];
-                if (inv.sns.includes(sn)) {
+                if (inv.sns.includes(trimmedSN)) {
                   const product = products.find(p => p.id === inv.productId);
                   if (product) {
                     const variant = product.variants.find((v: any) => v.id === inv.variantId);
                     if (variant) {
                       setCart(prev => [...prev, {
-                        sn,
+                        sn: trimmedSN,
                         productId: product.id,
                         variantId: variant.id,
                         name: product.name,
                         variantName: variant.name,
                         price: variant.sellingPrice,
+                        modal: variant.modalPrice || 0,
                         category: product.category,
                         provider: product.provider
                       }]);
                       const displayName = product.category === 'aksesoris' ? `${product.provider} ${variant.name} ${product.name}` : `${product.name} - ${variant.name}`;
                       setPosStatus({ message: `Scanned: ${displayName}`, type: 'success' });
                       found = true;
-                      setShowCameraScanner(null); // Close on success in POS for better UX
+                      setShowCameraScanner(null); 
                       break;
                     }
                   }
                 }
               }
+
+              // If not found in SNs, check Barcode Master (Kunci SN)
               if (!found) {
-                setPosStatus({ message: `SN ${sn} tidak ditemukan!`, type: 'error' });
+                for (const p of products) {
+                  const variantFound = p.variants?.find((v: any) => v.barcode?.trim() === trimmedSN);
+                  if (variantFound) {
+                    const invKey = `${p.id}_${variantFound.id}`;
+                    const currentInv = branchInventory[invKey];
+                    
+                    if (currentInv && currentInv.sns?.length > 0) {
+                      const pickedSN = currentInv.sns[0];
+                      setCart(prev => [...prev, {
+                        sn: pickedSN,
+                        productId: p.id,
+                        variantId: variantFound.id,
+                        name: p.name,
+                        variantName: variantFound.name,
+                        price: variantFound.sellingPrice,
+                        modal: variantFound.modalPrice || 0,
+                        category: p.category,
+                        provider: p.provider
+                      }]);
+                      const displayName = p.category === 'aksesoris' ? `${p.provider} ${variantFound.name} ${p.name}` : `${p.name} - ${variantFound.name}`;
+                      setPosStatus({ message: `Master Barcode Found: ${displayName}`, type: 'success' });
+                      found = true;
+                      setShowCameraScanner(null);
+                      break;
+                    } else {
+                      setPosStatus({ message: `Produk ditemukan, tapi Stok Kosong!`, type: 'error' });
+                      found = true;
+                      break;
+                    }
+                  }
+                }
+              }
+
+              if (!found) {
+                setPosStatus({ message: `SN / Barcode Master ${trimmedSN} tidak ditemukan!`, type: 'error' });
                 setTimeout(() => setPosStatus({ message: '', type: 'info' }), 2000);
               }
             }
@@ -3842,16 +4011,7 @@ export default function App() {
           </div>
         </div>
       )}
-      {/* Floating Audit Scanner for Auditors */}
-      {(userData?.role === 'audit' || userData?.role === 'admin') && activeMenu === 'dashboard' && !showCameraScanner && (
-        <button 
-          onClick={() => setShowCameraScanner('audit')}
-          className="fixed bottom-24 right-6 z-50 w-16 h-16 bg-accent-blue rounded-full shadow-2xl flex items-center justify-center text-gray-900 shadow-accent-blue/40 border-4 border-black/40 active:scale-90 transition-all hover:scale-110"
-          title="Scan Audit Barang"
-        >
-          <QrCode size={32} />
-        </button>
-      )}
+      {/* Floating Audit Scanner for Auditors (Deprecated - Moved to Audit Center) */}
 
     </div>
   );
