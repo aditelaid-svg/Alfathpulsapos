@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { db, auth } from './firebase';
-import { collection, onSnapshot, addDoc, serverTimestamp, doc, setDoc, updateDoc, getDoc, deleteDoc, query, where, collectionGroup, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, serverTimestamp, doc, setDoc, updateDoc, getDoc, deleteDoc, query, where, collectionGroup, getDocs, getDocFromServer } from 'firebase/firestore';
 import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { Sun, Moon, LayoutDashboard, ShoppingCart, Package, Store, Settings, Plus, ChevronRight, Hash, QrCode, UserCheck, ShieldAlert, MapPin, Trash2, Camera, X, Sparkles, ArrowLeftRight, RotateCcw, FileText, History, LogOut, TrendingUp, Wallet, PieChart, Activity, Coins, FileSpreadsheet, AlertTriangle, Pencil, ShieldCheck, Search } from 'lucide-react';
 import CameraScanner from './components/CameraScanner';
@@ -318,6 +318,25 @@ export default function App() {
       }
     });
   };
+
+  // Test Connection on Boot (Requirement)
+  useEffect(() => {
+    async function testConnection() {
+      try {
+        await getDocFromServer(doc(db, 'test', 'connection'));
+        console.log("Firestore connection successful.");
+      } catch (error: any) {
+        if (error?.code === 'unavailable') {
+          console.error("Firestore Error: Backend unreachable. Please check your internet connection or Firebase project status.");
+        } else if (error?.code === 'permission-denied') {
+          console.log("Firestore reached, but permissions denied (connectivity confirmed).");
+        } else {
+          console.log("Firestore connection check:", error.message || error);
+        }
+      }
+    }
+    testConnection();
+  }, []);
 
   useEffect(() => {
     const unsubAuth = auth.onAuthStateChanged(async (u) => {
