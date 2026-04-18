@@ -149,6 +149,7 @@ export default function App() {
   const [batchSNConfig, setBatchSNConfig] = useState({ sn: '', qty: 1 });
   const [rangeSNConfig, setRangeSNConfig] = useState({ start: '', end: '' });
   const [singleSNInput, setSingleSNInput] = useState('');
+  const [quickAddQty, setQuickAddQty] = useState(1);
   const [posScannerInput, setPosScannerInput] = useState('');
   const [posSearchQuery, setPosSearchQuery] = useState('');
   const [auditSearchQuery, setAuditSearchQuery] = useState('');
@@ -585,6 +586,47 @@ export default function App() {
       });
     } catch (e) {
       console.error("Audit log failed:", e);
+    }
+  };
+
+  const handleQuickAdd = async (quantity: number) => {
+    if (!selectedBranch || !viewState.product || !viewState.variant) return;
+    
+    try {
+      const itemKey = `${viewState.product.id}_${viewState.variant.id}`;
+      const itemRef = doc(db, `branches/${selectedBranch}/inventory`, itemKey);
+      const currentData = branchInventory[itemKey] || { sns: [], stock: 0 };
+      
+      const isAccessory = viewState.product.category === 'aksesoris';
+      
+      // For accessories, we don't need to track individual SNs in a list
+      // We just update the numeric stock count.
+      if (isAccessory) {
+        await setDoc(itemRef, {
+          productId: viewState.product.id,
+          variantId: viewState.variant.id,
+          sns: currentData.sns || [], // Keep existing if any, but adding new doesn't grow this
+          stock: (currentData.stock || 0) + quantity,
+          lastUpdated: serverTimestamp()
+        }, { merge: true });
+      } else {
+        // For Voucher/Perdana, keep tracking unique SNs
+        const snToUse = viewState.variant.barcode?.trim() || viewState.variant.name || 'UNIT';
+        const newSns = [...(currentData.sns || []), ...new Array(quantity).fill(snToUse)];
+        await setDoc(itemRef, {
+          productId: viewState.product.id,
+          variantId: viewState.variant.id,
+          sns: newSns,
+          stock: newSns.length,
+          lastUpdated: serverTimestamp()
+        });
+      }
+
+      const dispName = viewState.product.category === 'aksesoris' ? `${viewState.product.provider} ${viewState.variant.name} ${viewState.product.name}` : `${viewState.product.name} - ${viewState.variant.name}`;
+      setPosStatus({ message: `📦 Stok Ditambah (+${quantity}): ${dispName}`, type: 'success' });
+      setTimeout(() => setPosStatus({ message: '', type: 'info' }), 4000);
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.WRITE, 'inventory_quick_add');
     }
   };
 
@@ -2449,10 +2491,44 @@ export default function App() {
                     </div>
                   )}
 
-                  <div className="p-4 bg-white/5 rounded-2xl border border-white/5 col-span-2">
-                          <p className="text-[8px] text-text-dim uppercase tracking-widest">Stok Saat Ini (Cabang Terpilih)</p>
-                          <p className="text-lg font-bold">{branchInventory[`${viewState.product.id}_${viewState.variant.id}`]?.stock || 0}</p>
-                        </div>
+                  <div className={`grid ${(viewState.product.category === 'aksesoris') && (userData?.role === 'admin' || userData?.role === 'audit') ? 'grid-cols-2' : 'grid-cols-1'} gap-2`}>
+                    <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
+                      <p className="text-[8px] text-text-dim uppercase tracking-widest">Stok Saat Ini (Cabang)</p>
+                      <p className="text-lg font-bold">{branchInventory[`${viewState.product.id}_${viewState.variant.id}`]?.stock || 0}</p>
+                    </div>
+                    {viewState.product.category === 'aksesoris' && (userData?.role === 'admin' || userData?.role === 'audit') && (
+                      <div className="p-3 bg-accent-blue/5 rounded-2xl border border-accent-blue/20 flex flex-col gap-2">
+                         <p className="text-[7px] text-accent-blue font-black uppercase tracking-widest">Tambah Stok Cepat</p>
+                         <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-hide">
+                            {[1, 5, 10, 20, 50].map(val => (
+                              <button 
+                                key={val}
+                                onClick={() => handleQuickAdd(val)} 
+                                className="px-3 bg-accent-blue/10 text-accent-blue text-[9px] font-bold py-2 rounded-lg hover:bg-accent-blue hover:text-gray-900 transition-all whitespace-nowrap"
+                              >
+                                +{val}
+                              </button>
+                            ))}
+                         </div>
+                         <div className="flex gap-1">
+                            <input 
+                              type="number"
+                              className="w-full bg-black/40 border border-white/10 rounded-lg text-[10px] p-2 focus:outline-none focus:border-accent-blue font-bold text-center"
+                              placeholder="Kustom (Pcs)"
+                              value={quickAddQty || ''}
+                              onChange={e => setQuickAddQty(parseInt(e.target.value) || 0)}
+                            />
+                            <button 
+                              onClick={() => quickAddQty > 0 && handleQuickAdd(quickAddQty)}
+                              disabled={quickAddQty <= 0}
+                              className="px-4 bg-accent-blue text-gray-900 rounded-lg disabled:opacity-50 hover:bg-white transition-all active:scale-95 text-[10px] font-bold uppercase tracking-widest"
+                            >
+                               Tambah
+                            </button>
+                         </div>
+                      </div>
+                    )}
+                  </div>
 
                       <div className="space-y-4">
                       {(userData?.role === 'admin' || userData?.role === 'audit') && (
@@ -2471,7 +2547,13 @@ export default function App() {
                               </button>
                               {viewState.product.category === 'aksesoris' ? (
                                 <button 
-                                  onClick={() => { setShowBatchSN(true); setShowRangeSN(false); }}
+                                  onClick={() => { 
+                                    setShowBatchSN(true); 
+                                    setShowRangeSN(false); 
+                                    if (viewState.variant?.barcode) {
+                                      setBatchSNConfig(prev => ({ ...prev, sn: viewState.variant.barcode }));
+                                    }
+                                  }}
                                   className={`text-[9px] px-3 py-2 rounded-lg font-bold uppercase tracking-wider transition-all ${showBatchSN ? 'bg-accent-blue text-gray-900 shadow-lg' : 'text-text-dim'}`}
                                 >
                                   Batch
@@ -2723,37 +2805,49 @@ export default function App() {
                       )}
 
                       <div className="space-y-2 max-h-40 overflow-y-auto pr-2 scrollbar-hide">
-                        {(branchInventory[`${viewState.product.id}_${viewState.variant.id}`]?.sns || []).length > 0 ? (
-                          branchInventory[`${viewState.product.id}_${viewState.variant.id}`].sns.map((sn: string, sIdx: number) => (
-                            <div key={`${sn}-${sIdx}`} className="flex justify-between items-center p-3 bg-white/5 rounded-xl border border-white/5 group">
-                              <span className="text-[10px] font-mono tracking-wider">{sn}</span>
-                              <div className="flex items-center gap-2">
-                                {(userData?.role === 'admin' || userData?.role === 'audit') && (
-                                  <button 
-                                    onClick={() => handleDeleteSN(sn)}
-                                    className="p-1.5 text-red-500/60 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
-                                  >
-                                    <Trash2 size={12} />
-                                  </button>
-                                )}
-                                {userData?.role === 'employee' && (
-                                  <button 
-                                    onClick={() => {
-                                      setDisposalConfig({ productId: viewState.product.id, variantId: viewState.variant.id, sns: [sn], reason: 'broken' });
-                                      setShowDisposalModal(true);
-                                    }}
-                                    className="p-1.5 bg-red-500/10 text-red-500 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
-                                    title="Pemusnahan / Retur"
-                                  >
-                                    <RotateCcw size={12} />
-                                  </button>
-                                )}
-                                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-                              </div>
-                            </div>
-                          ))
+                        {viewState.product.category === 'aksesoris' ? (
+                          <div className="p-6 bg-accent-blue/5 rounded-2xl border border-accent-blue/20 text-center animate-in zoom-in-95">
+                             <TrendingUp className="mx-auto mb-2 text-accent-blue/40" size={24} />
+                             <p className="text-[10px] text-accent-blue font-bold uppercase tracking-[0.2em] mb-1">Stok Tersedia</p>
+                             <div className="flex items-center justify-center gap-2">
+                               <p className="text-3xl font-black font-mono">{(branchInventory[`${viewState.product.id}_${viewState.variant.id}`]?.stock || 0)}</p>
+                               <span className="text-[10px] text-text-dim font-bold uppercase">Pcs</span>
+                             </div>
+                             <p className="text-[8px] text-text-dim mt-3 italic italic-dim">Unit aksesoris dikelola secara bulk (angka), bukan SN unik.</p>
+                          </div>
                         ) : (
-                          <div className="p-4 text-center text-[10px] text-text-dim italic">Belum ada SN yang diinput untuk cabang ini.</div>
+                          (branchInventory[`${viewState.product.id}_${viewState.variant.id}`]?.sns || []).length > 0 ? (
+                            branchInventory[`${viewState.product.id}_${viewState.variant.id}`].sns.map((sn: string, sIdx: number) => (
+                              <div key={`${sn}-${sIdx}`} className="flex justify-between items-center p-3 bg-white/5 rounded-xl border border-white/5 group">
+                                <span className="text-[10px] font-mono tracking-wider">{sn}</span>
+                                <div className="flex items-center gap-2">
+                                  {(userData?.role === 'admin' || userData?.role === 'audit') && (
+                                    <button 
+                                      onClick={() => handleDeleteSN(sn)}
+                                      className="p-1.5 text-red-500/60 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                  )}
+                                  {userData?.role === 'employee' && (
+                                    <button 
+                                      onClick={() => {
+                                        setDisposalConfig({ productId: viewState.product.id, variantId: viewState.variant.id, sns: [sn], reason: 'broken' });
+                                        setShowDisposalModal(true);
+                                      }}
+                                      className="p-1.5 bg-red-500/10 text-red-500 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                                      title="Pemusnahan / Retur"
+                                    >
+                                      <RotateCcw size={12} />
+                                    </button>
+                                  )}
+                                  <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+                                </div>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="p-4 text-center text-[10px] text-text-dim italic">Belum ada SN yang diinput untuk cabang ini.</div>
+                          )
                         )}
                       </div>
                     </div>
@@ -2813,9 +2907,10 @@ export default function App() {
                   const invKey = `${p.id}_${variantFound.id}`;
                   const currentInv = branchInventory[invKey];
                   
-                  if (currentInv && currentInv.sns?.length > 0) {
-                    // Pick the first available SN for this model
-                    const pickedSN = currentInv.sns[0];
+                  // For accessories, we allow selling if numeric stock > 0
+                  if (currentInv && (p.category === 'aksesoris' ? currentInv.stock > 0 : currentInv.sns?.length > 0)) {
+                    // Use barcode as SN for accessories if no specific SN exists
+                    const pickedSN = (p.category === 'aksesoris') ? variantFound.barcode : (currentInv.sns?.[0] || variantFound.barcode);
                     setCart(prev => [...prev, {
                       sn: pickedSN,
                       productId: p.id,
@@ -2828,12 +2923,12 @@ export default function App() {
                       provider: p.provider
                     }]);
                     const displayName = p.category === 'aksesoris' ? `${p.provider} ${variantFound.name} ${p.name}` : `${p.name} - ${variantFound.name}`;
-                    setPosStatus({ message: `Master Barcode Found: ${displayName}`, type: 'success' });
+                    setPosStatus({ message: `Produk Ditemukan: ${displayName}`, type: 'success' });
                     found = true;
                     break;
                   } else {
-                    setPosStatus({ message: `Produk ditemukan, tapi Stok di cabang ini Kosong!`, type: 'error' });
-                    found = true; // Mark as found to avoid the generic "tidak ditemukan" message
+                    setPosStatus({ message: `Produk ditemukan, tapi Stok Kosong!`, type: 'error' });
+                    found = true; 
                     break;
                   }
                 }
@@ -2855,26 +2950,46 @@ export default function App() {
             onConfirm: async () => {
               try {
                 // Group by inventory key to update
-                const updates: any = {};
+                const updates: Record<string, any[]> = {};
                 cart.forEach(item => {
                   const key = `${item.productId}_${item.variantId}`;
                   if (!updates[key]) updates[key] = [];
-                  updates[key].push(item.sn);
+                  updates[key].push(item);
                 });
 
                 for (const key in updates) {
-                  const snList = updates[key];
+                  const itemsToSell = updates[key];
                   const itemRef = doc(db, `branches/${selectedBranch}/inventory`, key);
                   const currentData = branchInventory[key];
+                  const category = itemsToSell[0].category;
                   
-                  // Filter out the sold SNs
-                  const newSns = (currentData?.sns || []).filter((s: string) => !snList.includes(s));
-                  
-                  await updateDoc(itemRef, {
-                    sns: newSns,
-                    stock: newSns.length,
-                    lastUpdated: serverTimestamp()
-                  });
+                  if (category === 'aksesoris') {
+                    // For bulk accessories, just decrement numeric stock
+                    await updateDoc(itemRef, {
+                      stock: Math.max(0, (currentData?.stock || 0) - itemsToSell.length),
+                      lastUpdated: serverTimestamp()
+                    });
+                  } else {
+                    // For Voucher/Perdana, remove specific SNs from array one by one
+                    const snsToRemove = itemsToSell.map(i => i.sn);
+                    const existingSns = [...(currentData?.sns || [])];
+                    const finalSns = [];
+                    
+                    for (const sn of existingSns) {
+                      const idx = snsToRemove.indexOf(sn);
+                      if (idx > -1) {
+                        snsToRemove.splice(idx, 1);
+                      } else {
+                        finalSns.push(sn);
+                      }
+                    }
+
+                    await updateDoc(itemRef, {
+                      sns: finalSns,
+                      stock: finalSns.length,
+                      lastUpdated: serverTimestamp()
+                    });
+                  }
                 }
 
                 // Add to Global Transactions
