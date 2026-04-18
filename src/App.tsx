@@ -8,7 +8,7 @@ import * as XLSX from 'xlsx';
 import { db, auth } from './firebase';
 import { collection, onSnapshot, addDoc, serverTimestamp, doc, setDoc, updateDoc, getDoc, deleteDoc, query, where, collectionGroup, getDocs, getDocFromServer } from 'firebase/firestore';
 import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
-import { Sun, Moon, LayoutDashboard, ShoppingCart, Package, Store, Settings, Plus, ChevronRight, Hash, QrCode, UserCheck, ShieldAlert, MapPin, Trash2, Camera, X, Sparkles, ArrowLeftRight, RotateCcw, FileText, History, LogOut, TrendingUp, Wallet, PieChart, Activity, Coins, FileSpreadsheet, AlertTriangle, Pencil, ShieldCheck, Search } from 'lucide-react';
+import { Sun, Moon, LayoutDashboard, ShoppingCart, Package, Store, Settings, Plus, ChevronRight, Hash, QrCode, UserCheck, ShieldAlert, MapPin, Trash2, Camera, X, Sparkles, ArrowLeftRight, RotateCcw, FileText, History, LogOut, TrendingUp, Wallet, PieChart, Activity, Coins, FileSpreadsheet, AlertTriangle, Pencil, ShieldCheck, Search, Scan } from 'lucide-react';
 import CameraScanner from './components/CameraScanner';
 
 enum OperationType {
@@ -2370,16 +2370,92 @@ export default function App() {
                                 <Pencil size={12} />
                               </div>
                             )}
-                         </div>
-                       </div>
+                        </div>
                     </div>
-                        <div className="p-4 bg-white/5 rounded-2xl border border-white/5 col-span-2">
+                  </div>
+
+                  {isEditingPrice && (
+                    <div className="p-4 bg-accent-blue/10 border border-accent-blue/20 rounded-2xl space-y-4 animate-in zoom-in-95 duration-200">
+                      <div className="flex justify-between items-center px-1">
+                        <p className="text-[10px] font-bold text-accent-blue uppercase tracking-widest flex items-center gap-2">
+                          <Pencil size={12} />
+                          Edit Detail & Harga
+                        </p>
+                        <button onClick={() => setIsEditingPrice(false)} className="text-text-dim hover:text-white transition">
+                          <X size={16} />
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Harga Modal (Rp)</p>
+                          <input 
+                            type="number"
+                            className="w-full bg-black/40 border border-white/10 p-2.5 rounded-xl text-xs font-bold focus:outline-none focus:border-accent-blue"
+                            value={editPrice.modalPrice || ''}
+                            onChange={e => setEditPrice({...editPrice, modalPrice: parseInt(e.target.value) || 0})}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Harga Jual (Rp)</p>
+                          <input 
+                            type="number"
+                            className="w-full bg-black/40 border border-white/10 p-2.5 rounded-xl text-xs font-bold text-green-400 focus:outline-none focus:border-green-500/50"
+                            value={editPrice.sellingPrice || ''}
+                            onChange={e => setEditPrice({...editPrice, sellingPrice: parseInt(e.target.value) || 0})}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Min. Stok</p>
+                          <input 
+                            type="number"
+                            className="w-full bg-black/40 border border-white/10 p-2.5 rounded-xl text-xs font-bold focus:outline-none focus:border-accent-blue"
+                            value={editPrice.minStock || ''}
+                            onChange={e => setEditPrice({...editPrice, minStock: parseInt(e.target.value) || 0})}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Barcode / Kunci SN Master</p>
+                          <div className="flex gap-2">
+                            <input 
+                              className="flex-1 bg-black/40 border border-white/10 p-2.5 rounded-xl text-xs font-mono focus:outline-none focus:border-accent-blue"
+                              value={editPrice.barcode || ''}
+                              onChange={e => setEditPrice({...editPrice, barcode: e.target.value})}
+                            />
+                            <button 
+                              onClick={() => setShowCameraScanner('barcode-master')}
+                              className="p-2.5 bg-accent-blue/10 text-accent-blue border border-accent-blue/30 rounded-xl hover:bg-accent-blue hover:text-gray-900 transition-all"
+                            >
+                              <Scan size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2 pt-2">
+                        <button 
+                          onClick={handleUpdateVariantPrices}
+                          className="flex-1 bg-accent-blue text-gray-900 py-3 rounded-xl font-bold text-[10px] uppercase tracking-widest shadow-lg shadow-accent-blue/20 hover:bg-white active:scale-95 transition"
+                        >
+                          Simpan Perubahan
+                        </button>
+                        <button 
+                          onClick={() => setIsEditingPrice(false)}
+                          className="px-6 py-3 border border-white/10 rounded-xl text-[10px] font-bold uppercase tracking-widest text-text-dim hover:bg-white/5 transition"
+                        >
+                          Batal
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="p-4 bg-white/5 rounded-2xl border border-white/5 col-span-2">
                           <p className="text-[8px] text-text-dim uppercase tracking-widest">Stok Saat Ini (Cabang Terpilih)</p>
                           <p className="text-lg font-bold">{branchInventory[`${viewState.product.id}_${viewState.variant.id}`]?.stock || 0}</p>
                         </div>
 
                       <div className="space-y-4">
-                      {userData?.role === 'audit' && (
+                      {(userData?.role === 'admin' || userData?.role === 'audit') && (
                         <div className="flex justify-between items-center">
                           <h5 className="text-xs font-bold uppercase tracking-widest flex items-center gap-2">
                             <Hash size={14} className="text-accent-blue" />
@@ -2413,7 +2489,7 @@ export default function App() {
                         </div>
                       )}
 
-                      {userData?.role === 'audit' && !showBatchSN && !showRangeSN && (
+                      {(userData?.role === 'admin' || userData?.role === 'audit') && !showBatchSN && !showRangeSN && (
                         <div className="p-4 bg-white/5 rounded-2xl border border-accent-blue/30 space-y-3 animate-in fade-in slide-in-from-top-2">
                           <div className="flex justify-between items-center px-1">
                             <p className="text-[10px] font-bold text-accent-blue uppercase tracking-widest">Scan / Input SN Unik</p>
