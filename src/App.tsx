@@ -76,7 +76,7 @@ export default function App() {
   const [filterProvider, setFilterProvider] = useState<string | null>(null);
 
   const [isEditingPrice, setIsEditingPrice] = useState(false);
-  const [editPrice, setEditPrice] = useState({ modalPrice: 0, sellingPrice: 0, minStock: 5 });
+  const [editPrice, setEditPrice] = useState({ modalPrice: 0, sellingPrice: 0, minStock: 5, barcode: '' });
   const [isEditingProductName, setIsEditingProductName] = useState(false);
   const [editProductName, setEditProductName] = useState('');
   const [isEditingVariantName, setIsEditingVariantName] = useState(false);
@@ -101,7 +101,7 @@ export default function App() {
     provider: 'Telkomsel',
     category: 'voucher',
     targetProductId: '', // For adding to existing product (kept for backward schema compat but hidden from UI)
-    variant: { id: Math.random().toString(36).substr(2, 9), modalPrice: 0, sellingPrice: 0, description: '', minStock: 5 },
+    variant: { id: Math.random().toString(36).substr(2, 9), modalPrice: 0, sellingPrice: 0, description: '', minStock: 5, barcode: '' },
     sn: '',
     qty: 1
   });
@@ -114,7 +114,7 @@ export default function App() {
   const [posScannerInput, setPosScannerInput] = useState('');
   const [cart, setCart] = useState<any[]>([]);
   const [posStatus, setPosStatus] = useState({ message: '', type: 'info' });
-  const [showCameraScanner, setShowCameraScanner] = useState<'stock' | 'pos' | 'stock-initial' | 'audit' | null>(null);
+  const [showCameraScanner, setShowCameraScanner] = useState<'stock' | 'pos' | 'stock-initial' | 'audit' | 'barcode-master' | null>(null);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [transfers, setTransfers] = useState<any[]>([]);
   const [disposals, setDisposals] = useState<any[]>([]);
@@ -813,7 +813,8 @@ export default function App() {
             ...v,
             modalPrice: editPrice.modalPrice,
             sellingPrice: editPrice.sellingPrice,
-            minStock: editPrice.minStock
+            minStock: editPrice.minStock,
+            barcode: editPrice.barcode
           };
         }
         return v;
@@ -828,7 +829,8 @@ export default function App() {
           ...viewState.variant,
           modalPrice: editPrice.modalPrice,
           sellingPrice: editPrice.sellingPrice,
-          minStock: editPrice.minStock
+          minStock: editPrice.minStock,
+          barcode: editPrice.barcode
         }
       });
       
@@ -901,36 +903,52 @@ export default function App() {
 
   const handleAuditScan = async (sn: string) => {
     try {
-      // Cari SN di seluruh cabang (Collection Group)
+      // 1. Cari di Inventory (Stok Aktif)
       const invQuery = query(collectionGroup(db, 'inventory'), where('sns', 'array-contains', sn));
       const invSnap = await getDocs(invQuery);
 
-      if (invSnap.empty) {
-        setConfirmModal({
-          show: true,
-          title: "SN Tidak Ditemukan",
-          message: `Serial Number ${sn} tidak terdaftar di cabang manapun.`,
-          confirmText: "Tutup",
-          onConfirm: () => setConfirmModal(prev => ({ ...prev, show: false }))
+      if (!invSnap.empty) {
+        const itemData = invSnap.docs[0].data();
+        const product = products.find(p => p.id === itemData.productId);
+        const variant = product?.variants.find((v: any) => v.id === itemData.variantId);
+
+        if (product && variant) {
+          setViewState({
+             category: product.category,
+             provider: product.provider,
+             product: product,
+             variant: variant
+          });
+          setPosStatus({ message: `Ditemukan di Inventaris: ${product.name}`, type: 'success' });
+          setTimeout(() => setPosStatus({ message: '', type: 'info' }), 3000);
+          setShowCameraScanner(null);
+          return;
+        }
+      }
+
+      // 2. Jika tidak ada di stok, cari berdasarkan "Kunci SN / Barcode Master" (Khusus Aksesoris/Voucher)
+      const productWithMaster = products.find(p => p.variants?.some((v: any) => v.barcode === sn));
+      if (productWithMaster) {
+        const variant = productWithMaster.variants.find((v: any) => v.barcode === sn);
+        setViewState({
+          category: productWithMaster.category,
+          provider: productWithMaster.provider,
+          product: productWithMaster,
+          variant: variant
         });
+        setPosStatus({ message: `Ditemukan via Kunci SN: ${productWithMaster.name}`, type: 'success' });
+        setTimeout(() => setPosStatus({ message: '', type: 'info' }), 3000);
+        setShowCameraScanner(null);
         return;
       }
 
-      // Jika ditemukan
-      const itemData = invSnap.docs[0].data();
-      const product = products.find(p => p.id === itemData.productId);
-      const variant = product?.variants.find((v: any) => v.id === itemData.variantId);
-
-      if (product && variant) {
-        setViewState({
-           category: product.category,
-           provider: product.provider,
-           product: product,
-           variant: variant
-        });
-        setPosStatus({ message: `Ditemukan: ${product.name} - ${variant.name}`, type: 'success' });
-        setTimeout(() => setPosStatus({ message: '', type: 'info' }), 3000);
-      }
+      setConfirmModal({
+        show: true,
+        title: "SN Tidak Ditemukan",
+        message: `Serial Number/Barcode ${sn} tidak terdaftar di sistem.`,
+        confirmText: "Tutup",
+        onConfirm: () => setConfirmModal(prev => ({ ...prev, show: false }))
+      });
       
       setShowCameraScanner(null);
     } catch (error: any) {
@@ -1691,6 +1709,25 @@ export default function App() {
                            <div className="w-5 h-5 rounded-full bg-accent-blue/20 text-accent-blue flex items-center justify-center text-[10px] font-bold">2</div>
                            <h4 className="text-[11px] font-bold text-white uppercase tracking-wider">Spesifikasi Detail</h4>
                         </div>
+                        
+                        <div className="space-y-1">
+                          <p className="text-[9px] font-bold text-accent-blue uppercase tracking-widest ml-1">Kunci SN / Barcode Produk (Opsional)</p>
+                          <div className="flex gap-2">
+                            <input 
+                              placeholder="Scan / Ketik Barcode Master..." 
+                              className="flex-1 bg-black/40 border border-accent-blue/30 p-3 rounded-xl text-xs text-white focus:outline-none focus:border-accent-blue font-mono" 
+                              value={newProduct.variant.barcode || ''}
+                              onChange={e => setNewProduct({...newProduct, variant: { ...newProduct.variant, barcode: e.target.value }})} 
+                            />
+                            <button 
+                              onClick={() => setShowCameraScanner('stock-initial')}
+                              className="bg-accent-blue/20 p-3 rounded-xl text-accent-blue border border-accent-blue/30 hover:bg-accent-blue hover:text-gray-900 transition-colors"
+                            >
+                              <QrCode size={16} />
+                            </button>
+                          </div>
+                          <p className="text-[8px] text-text-dim italic ml-1">Kunci SN mempermudah identifikasi barang saat stok kosong.</p>
+                        </div>
 
                         <div className="space-y-1">
                           <p className="text-[9px] font-bold text-text-dim uppercase tracking-widest ml-1">Type / Varian</p>
@@ -2212,6 +2249,24 @@ export default function App() {
                             <p className="text-[10px] text-green-400 font-bold tracking-tight">{formatRupiah(editPrice.sellingPrice)}</p>
                           </div>
                           <div className="col-span-2 space-y-2">
+                            <p className="text-[8px] text-accent-blue font-bold uppercase tracking-widest ml-1">Kunci SN / Barcode Master</p>
+                            <div className="flex gap-2">
+                              <input 
+                                type="text"
+                                className="flex-1 bg-black/40 border border-white/10 p-3 rounded-xl text-xs text-white font-mono focus:outline-none focus:border-accent-blue"
+                                placeholder="Scan/Ketik Barcode Model..."
+                                value={editPrice.barcode}
+                                onChange={e => setEditPrice({...editPrice, barcode: e.target.value})}
+                              />
+                              <button 
+                                onClick={() => setShowCameraScanner('barcode-master')}
+                                className="bg-accent-blue/20 p-3 rounded-xl text-accent-blue border border-accent-blue/30"
+                              >
+                                <QrCode size={16} />
+                              </button>
+                            </div>
+                          </div>
+                          <div className="col-span-2 space-y-2">
                             <p className="text-[8px] text-text-dim uppercase tracking-widest ml-1">Limit Stok (Alert)</p>
                             <input 
                               type="number"
@@ -2242,7 +2297,8 @@ export default function App() {
                                     setEditPrice({
                                       modalPrice: viewState.variant.modalPrice || 0,
                                       sellingPrice: viewState.variant.sellingPrice || 0,
-                                      minStock: viewState.variant.minStock || 5
+                                      minStock: viewState.variant.minStock || 5,
+                                      barcode: viewState.variant.barcode || ''
                                     });
                                     setIsEditingPrice(true);
                                   }
@@ -2262,7 +2318,8 @@ export default function App() {
                                     setEditPrice({
                                       modalPrice: viewState.variant.modalPrice || 0,
                                       sellingPrice: viewState.variant.sellingPrice || 0,
-                                      minStock: viewState.variant.minStock || 5
+                                      minStock: viewState.variant.minStock || 5,
+                                      barcode: viewState.variant.barcode || ''
                                     });
                                     setIsEditingPrice(true);
                                   }
@@ -3213,11 +3270,18 @@ export default function App() {
       {/* Custom Confirmation Modal */}
       {showCameraScanner && (
         <CameraScanner 
-          title={showCameraScanner === 'stock' ? 'Input Stok SN' : showCameraScanner === 'stock-initial' ? 'Scan SN Awal' : showCameraScanner === 'audit' ? 'Audit Barang' : 'Scan Kasir POS'}
+          title={showCameraScanner === 'stock' ? 'Input Stok SN' : showCameraScanner === 'stock-initial' ? 'Scan SN Awal' : showCameraScanner === 'audit' ? 'Audit Barang' : showCameraScanner === 'barcode-master' ? 'Scan Kunci SN Master' : 'Scan Kasir POS'}
           onClose={() => setShowCameraScanner(null)}
           onScan={async (sn) => {
             if (showCameraScanner === 'stock-initial') {
               setNewProduct(prev => ({ ...prev, sn }));
+              setShowCameraScanner(null);
+            } else if (showCameraScanner === 'barcode-master') {
+              if (isEditingPrice) {
+                 setEditPrice(prev => ({ ...prev, barcode: sn }));
+              } else {
+                 setNewProduct(prev => ({ ...prev, variant: { ...prev.variant, barcode: sn } }));
+              }
               setShowCameraScanner(null);
             } else if (showCameraScanner === 'stock') {
                if (!selectedBranch || !viewState.product || !viewState.variant) return;
