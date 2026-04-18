@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { db, auth } from './firebase';
-import { collection, onSnapshot, addDoc, serverTimestamp, doc, setDoc, updateDoc, getDoc, deleteDoc, query, where } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, serverTimestamp, doc, setDoc, updateDoc, getDoc, deleteDoc, query, where, collectionGroup, getDocs } from 'firebase/firestore';
 import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { Sun, Moon, LayoutDashboard, ShoppingCart, Package, Store, Settings, Plus, ChevronRight, Hash, QrCode, UserCheck, ShieldAlert, MapPin, Trash2, Camera, X, Sparkles, ArrowLeftRight, RotateCcw, FileText, History, LogOut, TrendingUp, Wallet, PieChart, Activity, Coins, FileSpreadsheet, AlertTriangle } from 'lucide-react';
 import CameraScanner from './components/CameraScanner';
@@ -74,6 +74,9 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('voucher');
   const [filterProvider, setFilterProvider] = useState<string | null>(null);
+
+  const [isEditingPrice, setIsEditingPrice] = useState(false);
+  const [editPrice, setEditPrice] = useState({ modalPrice: 0, sellingPrice: 0, minStock: 5 });
 
   const filteredProducts = products.filter(p => {
     const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -174,20 +177,41 @@ export default function App() {
   });
 
   const handleDeleteProduct = async (productId: string) => {
-    setConfirmModal({
-      show: true,
-      title: "Hapus Produk",
-      message: "Hapus produk ini secara permanen dari pusat? Data stok di semua cabang juga akan terputus dari master ini.",
-      onConfirm: async () => {
-        try {
-          await deleteDoc(doc(db, 'products', productId));
-          if (viewState.product?.id === productId) setViewState({ ...viewState, product: null, variant: null });
-          setConfirmModal(prev => ({ ...prev, show: false }));
-        } catch (error) {
-          handleFirestoreError(error, OperationType.DELETE, `products/${productId}`);
-        }
+    try {
+      // Check if any variant of this product has stock in any branch
+      const invQuery = query(collectionGroup(db, 'inventory'), where('productId', '==', productId));
+      const invSnap = await getDocs(invQuery);
+      const hasStock = invSnap.docs.some(doc => doc.data().stock > 0);
+
+      if (hasStock) {
+        setConfirmModal({
+          show: true,
+          title: "Produk Dikunci",
+          message: "Tidak dapat menghapus produk ini karena masih ada stok (SN) yang tersisa di salah satu cabang. Kosongkan stok terlebih dahulu.",
+          confirmText: "Tutup",
+          onConfirm: () => setConfirmModal(prev => ({ ...prev, show: false }))
+        });
+        return;
       }
-    });
+
+      setConfirmModal({
+        show: true,
+        title: "Hapus Produk",
+        message: "Hapus produk ini secara permanen dari pusat? Data stok di semua cabang juga akan terputus dari master ini.",
+        onConfirm: async () => {
+          try {
+            await deleteDoc(doc(db, 'products', productId));
+            if (viewState.product?.id === productId) setViewState({ ...viewState, product: null, variant: null });
+            setConfirmModal(prev => ({ ...prev, show: false }));
+          } catch (error) {
+            handleFirestoreError(error, OperationType.DELETE, `products/${productId}`);
+          }
+        }
+      });
+    } catch (error) {
+      console.error("Error checking stock before deletion:", error);
+      // Fallback to simple confirmation if check fails
+    }
   };
 
   const handleReturnTransaction = async (tx: any) => {
@@ -495,27 +519,47 @@ export default function App() {
   };
 
   const handleDeleteVariant = async (productId: string, variantId: string) => {
-    setConfirmModal({
-      show: true,
-      title: "Hapus Varian",
-      message: "Hapus paksa varian ini dari katalog? Stok terdaftar akan tetap ada di database tapi tidak akan muncul di menu.",
-      onConfirm: async () => {
-        try {
-          const productRef = doc(db, 'products', productId);
-          const pDoc = await getDoc(productRef);
-          if (pDoc.exists()) {
-            const data = pDoc.data();
-            const vId = variantId;
-            const newVariants = data.variants.filter((v: any) => (v.id || v.name) !== vId);
-            await updateDoc(productRef, { variants: newVariants });
-          }
-          setConfirmModal(prev => ({ ...prev, show: false }));
-          setViewState(prev => ({ ...prev, product: null, variant: null }));
-        } catch (error) {
-          handleFirestoreError(error, OperationType.DELETE, `variants/${variantId}`);
-        }
+    try {
+      // Check if this variant has stock in any branch
+      const invQuery = query(collectionGroup(db, 'inventory'), where('variantId', '==', variantId));
+      const invSnap = await getDocs(invQuery);
+      const hasStock = invSnap.docs.some(doc => doc.data().stock > 0);
+
+      if (hasStock) {
+        setConfirmModal({
+          show: true,
+          title: "Tipe Dikunci",
+          message: "Tidak dapat menghapus tipe ini karena masih ada stok (SN) yang tersisa di salah satu cabang. Kosongkan stok terlebih dahulu.",
+          confirmText: "Tutup",
+          onConfirm: () => setConfirmModal(prev => ({ ...prev, show: false }))
+        });
+        return;
       }
-    });
+
+      setConfirmModal({
+        show: true,
+        title: "Hapus Varian",
+        message: "Hapus paksa varian ini dari katalog? Stok terdaftar akan tetap ada di database tapi tidak akan muncul di menu.",
+        onConfirm: async () => {
+          try {
+            const productRef = doc(db, 'products', productId);
+            const pDoc = await getDoc(productRef);
+            if (pDoc.exists()) {
+              const data = pDoc.data();
+              const vId = variantId;
+              const newVariants = data.variants.filter((v: any) => (v.id || v.name) !== vId);
+              await updateDoc(productRef, { variants: newVariants });
+            }
+            setConfirmModal(prev => ({ ...prev, show: false }));
+            setViewState(prev => ({ ...prev, product: null, variant: null }));
+          } catch (error) {
+            handleFirestoreError(error, OperationType.DELETE, `variants/${variantId}`);
+          }
+        }
+      });
+    } catch (error) {
+      console.error("Error checking variant stock before deletion:", error);
+    }
   };
 
   const handleSaveProduct = async () => {
@@ -646,25 +690,45 @@ export default function App() {
     const product = products.find(p => p.id === productId);
     if (!product) return;
 
-    setConfirmModal({
-      show: true,
-      title: "Hapus Tipe/Varian",
-      message: `Hapus tipe barang ini secara permanen dari pusat? Data stok di cabang untuk tipe ini juga akan hilang.`,
-      onConfirm: async () => {
-        try {
-          const newVariants = product.variants.filter((v: any) => v.id !== variantId);
-          if (newVariants.length === 0) {
-            await deleteDoc(doc(db, 'products', productId));
-          } else {
-            await updateDoc(doc(db, 'products', productId), { variants: newVariants });
-          }
-          setViewState({ ...viewState, product: null, variant: null });
-          setConfirmModal(prev => ({ ...prev, show: false }));
-        } catch (error) {
-          handleFirestoreError(error, OperationType.DELETE, `products/${productId}/variants/${variantId}`);
-        }
+    try {
+      // Check if this variant has stock in any branch
+      const invQuery = query(collectionGroup(db, 'inventory'), where('variantId', '==', variantId));
+      const invSnap = await getDocs(invQuery);
+      const hasStock = invSnap.docs.some(doc => doc.data().stock > 0);
+
+      if (hasStock) {
+        setConfirmModal({
+          show: true,
+          title: "Tipe Dikunci",
+          message: "Tidak dapat menghapus tipe ini karena masih ada stok (SN) yang tersisa di salah satu cabang. Kosongkan stok terlebih dahulu.",
+          confirmText: "Tutup",
+          onConfirm: () => setConfirmModal(prev => ({ ...prev, show: false }))
+        });
+        return;
       }
-    });
+
+      setConfirmModal({
+        show: true,
+        title: "Hapus Tipe/Varian",
+        message: `Hapus tipe barang ini secara permanen dari pusat? Data stok di cabang untuk tipe ini juga akan hilang.`,
+        onConfirm: async () => {
+          try {
+            const newVariants = product.variants.filter((v: any) => v.id !== variantId);
+            if (newVariants.length === 0) {
+              await deleteDoc(doc(db, 'products', productId));
+            } else {
+              await updateDoc(doc(db, 'products', productId), { variants: newVariants });
+            }
+            setViewState({ ...viewState, product: null, variant: null });
+            setConfirmModal(prev => ({ ...prev, show: false }));
+          } catch (error) {
+            handleFirestoreError(error, OperationType.DELETE, `products/${productId}/variants/${variantId}`);
+          }
+        }
+      });
+    } catch (error) {
+      console.error("Error checking variant stock before deletion:", error);
+    }
   };
 
   const handleTransfer = async () => {
@@ -769,6 +833,51 @@ export default function App() {
       setTimeout(() => setPosStatus({ message: '', type: 'info' }), 3000);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'disposals');
+    }
+  };
+
+  const handleUpdateVariantPrices = async () => {
+    if (!viewState.product || !viewState.variant) return;
+    
+    try {
+      const productRef = doc(db, 'products', viewState.product.id);
+      const productSnap = await getDoc(productRef);
+      
+      if (!productSnap.exists()) return;
+      
+      const productData = productSnap.data();
+      const variants = productData.variants || [];
+      
+      const updatedVariants = variants.map((v: any) => {
+        if (v.id === viewState.variant.id) {
+          return {
+            ...v,
+            modalPrice: editPrice.modalPrice,
+            sellingPrice: editPrice.sellingPrice,
+            minStock: editPrice.minStock
+          };
+        }
+        return v;
+      });
+      
+      await updateDoc(productRef, { variants: updatedVariants });
+      
+      // Update local viewState
+      setViewState({
+        ...viewState,
+        variant: {
+          ...viewState.variant,
+          modalPrice: editPrice.modalPrice,
+          sellingPrice: editPrice.sellingPrice,
+          minStock: editPrice.minStock
+        }
+      });
+      
+      setIsEditingPrice(false);
+      setPosStatus({ message: "Harga Berhasil Diperbarui!", type: 'success' });
+      setTimeout(() => setPosStatus({ message: '', type: 'info' }), 3000);
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.UPDATE, `products/${viewState.product.id}`);
     }
   };
 
@@ -1936,12 +2045,96 @@ export default function App() {
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
-                      <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
-                        <p className="text-[8px] text-text-dim uppercase tracking-widest">Harga Jual</p>
-                        <p className="text-lg font-bold">Rp {viewState.variant.sellingPrice?.toLocaleString()}</p>
-                      </div>
-                      <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
-                        <p className="text-[8px] text-text-dim uppercase tracking-widest">Stok Saat Ini</p>
+                      {isEditingPrice ? (
+                        <>
+                          <div className="p-4 bg-white/5 rounded-2xl border border-accent-blue/30 space-y-2">
+                            <p className="text-[8px] text-text-dim uppercase tracking-widest">Harga Modal (Beli)</p>
+                            <input 
+                              type="number"
+                              className="w-full bg-black/40 border border-white/10 p-2 rounded-lg text-sm font-bold text-white focus:outline-none focus:border-accent-blue"
+                              value={editPrice.modalPrice}
+                              onChange={e => setEditPrice({...editPrice, modalPrice: Number(e.target.value)})}
+                            />
+                            <p className="text-[10px] text-accent-blue font-bold tracking-tight">{formatRupiah(editPrice.modalPrice)}</p>
+                          </div>
+                          <div className="p-4 bg-white/5 rounded-2xl border border-accent-blue/30 space-y-2">
+                            <p className="text-[8px] text-text-dim uppercase tracking-widest">Harga Jual</p>
+                            <input 
+                              type="number"
+                              className="w-full bg-black/40 border border-white/10 p-2 rounded-lg text-sm font-bold text-green-400 focus:outline-none focus:border-green-500"
+                              value={editPrice.sellingPrice}
+                              onChange={e => setEditPrice({...editPrice, sellingPrice: Number(e.target.value)})}
+                            />
+                            <p className="text-[10px] text-green-400 font-bold tracking-tight">{formatRupiah(editPrice.sellingPrice)}</p>
+                          </div>
+                          <div className="col-span-2 space-y-2">
+                            <p className="text-[8px] text-text-dim uppercase tracking-widest ml-1">Limit Stok (Alert)</p>
+                            <input 
+                              type="number"
+                              className="w-full bg-black/40 border border-white/10 p-3 rounded-xl text-xs text-red-400 font-bold focus:outline-none focus:border-red-500"
+                              value={editPrice.minStock}
+                              onChange={e => setEditPrice({...editPrice, minStock: Number(e.target.value)})}
+                            />
+                          </div>
+                          <div className="col-span-2 flex gap-2 pt-2">
+                            <button 
+                              onClick={handleUpdateVariantPrices}
+                              className="flex-1 py-4 bg-accent-blue text-gray-900 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-lg shadow-accent-blue/20 transition-all active:scale-95"
+                            >
+                              Simpan Update
+                            </button>
+                            <button 
+                              onClick={() => setIsEditingPrice(false)}
+                              className="px-6 py-4 bg-white/5 border border-white/10 rounded-2xl font-bold uppercase tracking-widest text-[10px] hover:bg-white/10 transition-colors"
+                            >
+                              Batal
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="p-4 bg-white/5 rounded-2xl border border-white/5 group relative">
+                            <p className="text-[8px] text-text-dim uppercase tracking-widest">Harga Modal</p>
+                            <p className="text-lg font-bold">{formatRupiah(viewState.variant.modalPrice || 0)}</p>
+                            {userData?.role === 'admin' && (
+                              <button 
+                                onClick={() => {
+                                  setEditPrice({
+                                    modalPrice: viewState.variant.modalPrice || 0,
+                                    sellingPrice: viewState.variant.sellingPrice || 0,
+                                    minStock: viewState.variant.minStock || 5
+                                  });
+                                  setIsEditingPrice(true);
+                                }}
+                                className="absolute top-2 right-2 p-1.5 bg-accent-blue/10 text-accent-blue rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <Settings size={12} />
+                              </button>
+                            )}
+                          </div>
+                          <div className="p-4 bg-white/5 rounded-2xl border border-white/5 group relative">
+                            <p className="text-[8px] text-text-dim uppercase tracking-widest">Harga Jual</p>
+                            <p className="text-lg font-bold text-green-400">{formatRupiah(viewState.variant.sellingPrice || 0)}</p>
+                            {userData?.role === 'admin' && (
+                              <button 
+                                onClick={() => {
+                                  setEditPrice({
+                                    modalPrice: viewState.variant.modalPrice || 0,
+                                    sellingPrice: viewState.variant.sellingPrice || 0,
+                                    minStock: viewState.variant.minStock || 5
+                                  });
+                                  setIsEditingPrice(true);
+                                }}
+                                className="absolute top-2 right-2 p-1.5 bg-accent-blue/10 text-accent-blue rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <Settings size={12} />
+                              </button>
+                            )}
+                          </div>
+                        </>
+                      )}
+                      <div className="p-4 bg-white/5 rounded-2xl border border-white/5 col-span-2">
+                        <p className="text-[8px] text-text-dim uppercase tracking-widest">Stok Saat Ini (Cabang Terpilih)</p>
                         <p className="text-lg font-bold">{branchInventory[`${viewState.product.id}_${viewState.variant.id}`]?.stock || 0}</p>
                       </div>
                     </div>
