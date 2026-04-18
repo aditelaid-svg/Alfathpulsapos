@@ -170,6 +170,7 @@ export default function App() {
   const [handovers, setHandovers] = useState<any[]>([]);
   const [showHandoverModal, setShowHandoverModal] = useState(false);
   const [handoverConfig, setHandoverConfig] = useState({ cash: 0, notes: '', shift: 'siang' });
+  const [isShiftActive, setIsShiftActive] = useState(false);
 
   const providersList = ['Telkomsel', 'Indosat', 'XL', 'Axis', 'Three', 'Smartfren', 'Lainnya'];
   const brandsList = ['Robot', 'Vivan', 'Baseus', 'Oppo', 'Samsung', 'Vivo', 'Xiaomi', 'Rexi', 'Foomee', 'Lainnya'];
@@ -1404,38 +1405,22 @@ export default function App() {
                   <p className="text-xl font-black tracking-tighter">{totalBranchStock} <span className="text-[10px] font-bold opacity-50 uppercase">Pcs</span></p>
                 </div>
                 <div className="glass-card p-3 border-white/10">
-                  <p className="text-[8px] font-bold text-text-dim uppercase tracking-widest mb-1">Sales Hari Ini</p>
+                  <p className="text-[8px] font-bold text-text-dim uppercase tracking-widest mb-1">Sales Cabang ({branches.find(b => b.id === selectedBranch)?.name || 'Anda'})</p>
                   <p className="text-xl font-black tracking-tighter">{branchDailySales} <span className="text-[10px] font-bold opacity-50 uppercase">Item</span></p>
                 </div>
             </div>
 
             <section className="bg-accent-blue/10 border border-accent-blue/20 p-4 rounded-3xl relative overflow-hidden group">
                <Sparkles className="absolute -top-4 -right-4 text-accent-blue/20 group-hover:scale-110 transition-transform" size={120} />
-               <h3 className="text-[9px] font-bold text-accent-blue uppercase tracking-widest relative z-10 mb-2">Pencapaian Omset</h3>
+               <h3 className="text-[9px] font-bold text-accent-blue uppercase tracking-widest relative z-10 mb-2">Omset Hari Ini (Cabang)</h3>
                <p className="text-2xl font-black tracking-tight text-white relative z-10">{formatRupiah(branchDailyRevenue)}</p>
-               <p className="text-[8px] text-accent-blue/70 relative z-10 uppercase font-bold mt-2 tracking-widest italic">Target per hari: Capai omset maksimal!</p>
+               <p className="text-[8px] text-accent-blue/70 relative z-10 uppercase font-bold mt-2 tracking-widest italic">Semangat melayani pelanggan!</p>
             </section>
-
-            <button 
-               onClick={() => setShowHandoverModal(true)}
-               className="w-full bg-white/5 border border-white/10 p-4 rounded-3xl flex items-center justify-between group hover:border-accent-blue/50 transition-all"
-            >
-               <div className="flex items-center gap-3">
-                 <div className="w-10 h-10 rounded-2xl bg-accent-blue/10 text-accent-blue flex items-center justify-center group-hover:scale-110 transition-transform">
-                   <RotateCcw size={20} />
-                 </div>
-                 <div className="text-left">
-                   <p className="text-[11px] font-black text-white uppercase tracking-tight">Oper Shift / Serah Terima</p>
-                   <p className="text-[8px] text-text-dim font-bold uppercase tracking-widest">Selesaikan Sesi Jaga Anda</p>
-                 </div>
-               </div>
-               <ChevronRight size={18} className="text-text-dim" />
-            </button>
           </div>
         );
       case 'system':
         return (
-          <div className="space-y-8">
+          <div className="space-y-8 pb-32 px-1">
             <section className="space-y-4">
               <div className="flex justify-between items-center">
                 <h2 className="text-xl font-semibold text-text-dim">Kelola Cabang</h2>
@@ -2336,151 +2321,64 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                      {isEditingPrice ? (
-                        <>
-                          <div className="col-span-2 space-y-3 bg-accent-blue/5 p-4 rounded-3xl border border-accent-blue/10">
-                            <div className="space-y-1">
-                              <p className="text-[8px] text-accent-blue font-black uppercase tracking-widest ml-1">Nama Grup Produk</p>
-                              <input 
-                                type="text"
-                                className="w-full bg-black/40 border border-white/10 p-3 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-accent-blue"
-                                value={editPrice.productName}
-                                onChange={e => setEditPrice({...editPrice, productName: e.target.value})}
-                                placeholder="Edit Nama Grup..."
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <p className="text-[8px] text-accent-blue font-black uppercase tracking-widest ml-1">Nama Tipe / Model</p>
-                              <input 
-                                type="text"
-                                className="w-full bg-black/40 border border-white/10 p-3 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-accent-blue"
-                                value={editPrice.variantName}
-                                onChange={e => setEditPrice({...editPrice, variantName: e.target.value})}
-                                placeholder="Edit Nama Tipe..."
-                              />
-                            </div>
-                          </div>
-
-                          <div className="p-4 bg-white/5 rounded-2xl border border-accent-blue/30 space-y-2">
-                            <p className="text-[8px] text-text-dim uppercase tracking-widest">Harga Modal (Beli)</p>
-                            <input 
-                              type="number"
-                              className="w-full bg-black/40 border border-white/10 p-2 rounded-lg text-sm font-bold text-white focus:outline-none focus:border-accent-blue"
-                              value={editPrice.modalPrice}
-                              onChange={e => setEditPrice({...editPrice, modalPrice: Number(e.target.value)})}
-                            />
-                            <p className="text-[10px] text-accent-blue font-bold tracking-tight">{formatRupiah(editPrice.modalPrice)}</p>
-                          </div>
-                          <div className="p-4 bg-white/5 rounded-2xl border border-accent-blue/30 space-y-2">
-                            <p className="text-[8px] text-text-dim uppercase tracking-widest">Harga Jual</p>
-                            <input 
-                              type="number"
-                              className="w-full bg-black/40 border border-white/10 p-2 rounded-lg text-sm font-bold text-green-400 focus:outline-none focus:border-green-500"
-                              value={editPrice.sellingPrice}
-                              onChange={e => setEditPrice({...editPrice, sellingPrice: Number(e.target.value)})}
-                            />
-                            <p className="text-[10px] text-green-400 font-bold tracking-tight">{formatRupiah(editPrice.sellingPrice)}</p>
-                          </div>
-                          <div className="col-span-2 space-y-2">
-                            <p className="text-[8px] text-accent-blue font-bold uppercase tracking-widest ml-1">Kunci SN / Barcode Master</p>
-                            <div className="flex gap-2">
-                              <input 
-                                type="text"
-                                className="flex-1 bg-black/40 border border-white/10 p-3 rounded-xl text-xs text-white font-mono focus:outline-none focus:border-accent-blue"
-                                placeholder="Scan/Ketik Barcode Model..."
-                                value={editPrice.barcode}
-                                onChange={e => setEditPrice({...editPrice, barcode: e.target.value})}
-                              />
-                              <button 
-                                onClick={() => setShowCameraScanner('barcode-master')}
-                                className="bg-accent-blue/20 p-3 rounded-xl text-accent-blue border border-accent-blue/30"
-                              >
-                                <QrCode size={16} />
-                              </button>
-                            </div>
-                          </div>
-                          <div className="col-span-2 space-y-2">
-                            <p className="text-[8px] text-text-dim uppercase tracking-widest ml-1">Limit Stok (Alert)</p>
-                            <input 
-                              type="number"
-                              className="w-full bg-black/40 border border-white/10 p-3 rounded-xl text-xs text-red-400 font-bold focus:outline-none focus:border-red-500"
-                              value={editPrice.minStock}
-                              onChange={e => setEditPrice({...editPrice, minStock: Number(e.target.value)})}
-                            />
-                          </div>
-                          <div className="col-span-2 flex gap-2 pt-2">
-                            <button 
-                              onClick={handleUpdateVariantPrices}
-                              className="flex-1 py-4 bg-accent-blue text-gray-900 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-lg shadow-accent-blue/20 transition-all active:scale-95"
-                            >
-                              Simpan Update
-                            </button>
-                            <button 
-                              onClick={() => setIsEditingPrice(false)}
-                              className="px-6 py-4 bg-white/5 border border-white/10 rounded-2xl font-bold uppercase tracking-widest text-[10px] hover:bg-white/10 transition-colors"
-                            >
-                              Batal
-                            </button>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                              <div className="p-4 bg-white/5 rounded-2xl border border-white/5 group relative hover:border-accent-blue/30 transition-all cursor-pointer" onClick={() => {
-                                  if (userData?.role === 'admin' || userData?.role === 'audit') {
-                                    setEditPrice({
-                                      productName: viewState.product.name,
-                                      variantName: viewState.variant.name,
-                                      modalPrice: viewState.variant.modalPrice || 0,
-                                      sellingPrice: viewState.variant.sellingPrice || 0,
-                                      minStock: viewState.variant.minStock || 5,
-                                      barcode: viewState.variant.barcode || ''
-                                    });
-                                    setIsEditingPrice(true);
-                                  }
-                                }}>
+                    <div className="flex gap-2">
+                        {/* Price Details - Filtered by role - Updated to hide modal from employee again */}
+                        {(userData?.role === 'admin' || userData?.role === 'audit') && (
+                          <div className={`p-4 bg-white/5 rounded-2xl border border-white/5 group relative hover:border-accent-blue/30 transition-all cursor-pointer ${isEditingPrice ? 'hidden' : 'block'}`} onClick={() => {
+                              if (userData?.role === 'admin') {
+                                setEditPrice({
+                                  productName: viewState.product.name,
+                                  variantName: viewState.variant.name,
+                                  modalPrice: viewState.variant.modalPrice || 0,
+                                  sellingPrice: viewState.variant.sellingPrice || 0,
+                                  minStock: viewState.variant.minStock || 5,
+                                  barcode: viewState.variant.barcode || ''
+                                });
+                                setIsEditingPrice(true);
+                              }
+                            }}>
                             <p className="text-[8px] text-text-dim uppercase tracking-widest">Harga Modal</p>
                             <div className="flex justify-between items-end">
-                               <p className="text-lg font-bold">{formatRupiah(viewState.variant.modalPrice || 0)}</p>
-                               {userData?.role === 'admin' && (
-                                 <div className="p-1.5 bg-accent-blue/10 text-accent-blue rounded-lg">
-                                   <Pencil size={12} />
-                                 </div>
-                               )}
+                              <p className="text-lg font-bold">{formatRupiah(viewState.variant.modalPrice || 0)}</p>
+                              {userData?.role === 'admin' && (
+                                <div className="p-1.5 bg-accent-blue/10 text-accent-blue rounded-lg">
+                                  <Pencil size={12} />
+                                </div>
+                              )}
                             </div>
                           </div>
-                              <div className="p-4 bg-white/5 rounded-2xl border border-white/5 group relative hover:border-green-500/30 transition-all cursor-pointer" onClick={() => {
-                                  if (userData?.role === 'admin' || userData?.role === 'audit') {
-                                    setEditPrice({
-                                      productName: viewState.product.name,
-                                      variantName: viewState.variant.name,
-                                      modalPrice: viewState.variant.modalPrice || 0,
-                                      sellingPrice: viewState.variant.sellingPrice || 0,
-                                      minStock: viewState.variant.minStock || 5,
-                                      barcode: viewState.variant.barcode || ''
-                                    });
-                                    setIsEditingPrice(true);
-                                  }
-                                }}>
-                            <p className="text-[8px] text-text-dim uppercase tracking-widest">Harga Jual</p>
-                            <div className="flex justify-between items-end">
-                               <p className="text-lg font-bold text-green-400">{formatRupiah(viewState.variant.sellingPrice || 0)}</p>
-                               {userData?.role === 'admin' && (
-                                 <div className="p-1.5 bg-green-500/10 text-green-500 rounded-lg">
-                                   <Pencil size={12} />
-                                 </div>
-                               )}
-                            </div>
-                          </div>
-                        </>
-                      )}
-                      <div className="p-4 bg-white/5 rounded-2xl border border-white/5 col-span-2">
-                        <p className="text-[8px] text-text-dim uppercase tracking-widest">Stok Saat Ini (Cabang Terpilih)</p>
-                        <p className="text-lg font-bold">{branchInventory[`${viewState.product.id}_${viewState.variant.id}`]?.stock || 0}</p>
-                      </div>
+                        )}
+                       
+                       <div className={`p-4 bg-white/5 rounded-2xl border border-white/5 group relative hover:border-green-500/30 transition-all cursor-pointer flex-1 ${isEditingPrice ? 'hidden' : 'block'}`} onClick={() => {
+                           if (userData?.role === 'admin') {
+                             setEditPrice({
+                               productName: viewState.product.name,
+                               variantName: viewState.variant.name,
+                               modalPrice: viewState.variant.modalPrice || 0,
+                               sellingPrice: viewState.variant.sellingPrice || 0,
+                               minStock: viewState.variant.minStock || 5,
+                               barcode: viewState.variant.barcode || ''
+                             });
+                             setIsEditingPrice(true);
+                           }
+                         }}>
+                         <p className="text-[8px] text-text-dim uppercase tracking-widest">Harga Jual</p>
+                         <div className="flex justify-between items-end">
+                            <p className="text-lg font-bold text-green-400">{formatRupiah(viewState.variant.sellingPrice || 0)}</p>
+                            {userData?.role === 'admin' && (
+                              <div className="p-1.5 bg-green-500/10 text-green-500 rounded-lg">
+                                <Pencil size={12} />
+                              </div>
+                            )}
+                         </div>
+                       </div>
                     </div>
+                        <div className="p-4 bg-white/5 rounded-2xl border border-white/5 col-span-2">
+                          <p className="text-[8px] text-text-dim uppercase tracking-widest">Stok Saat Ini (Cabang Terpilih)</p>
+                          <p className="text-lg font-bold">{branchInventory[`${viewState.product.id}_${viewState.variant.id}`]?.stock || 0}</p>
+                        </div>
 
-                    <div className="space-y-4">
+                      <div className="space-y-4">
                       {userData?.role === 'audit' && (
                         <div className="flex justify-between items-center">
                           <h5 className="text-xs font-bold uppercase tracking-widest flex items-center gap-2">
@@ -2945,13 +2843,51 @@ export default function App() {
         return (
           <div className="space-y-6 pb-20">
             <div className="flex justify-between items-center">
-               <h2 className="text-xl font-black text-text-dim tracking-tight">KASIR / POS</h2>
-               <div className="text-[10px] bg-accent-blue/10 text-accent-blue px-3 py-1 rounded-full font-bold border border-accent-blue/20 uppercase tracking-widest">
-                  {branches.find(b => b.id === selectedBranch)?.name || 'Cabang'}
-                </div>
+               <div className="flex flex-col">
+                  <h2 className="text-xl font-black text-text-dim tracking-tight leading-none">KASIR / POS</h2>
+                  <div className="flex items-center gap-2 mt-1">
+                     <span className={`w-1.5 h-1.5 rounded-full ${isShiftActive ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
+                     <span className="text-[8px] font-bold text-text-dim uppercase tracking-widest">{isShiftActive ? 'Shift Aktif' : 'Shift Belum Buka'}</span>
+                  </div>
+               </div>
+               <div className="flex items-center gap-2">
+                  <div className="text-[10px] bg-accent-blue/10 text-accent-blue px-3 py-1 rounded-full font-bold border border-accent-blue/20 uppercase tracking-widest">
+                     {branches.find(b => b.id === selectedBranch)?.name || 'Cabang'}
+                  </div>
+                  {isShiftActive && (
+                    <button 
+                       onClick={() => setShowHandoverModal(true)}
+                       className="p-2 bg-red-500/10 text-red-500 rounded-xl border border-red-500/20 hover:bg-red-500 hover:text-white transition group"
+                       title="Oper Shift / Selesai Sesi"
+                    >
+                       <RotateCcw size={14} className="group-hover:rotate-180 transition-transform duration-500" />
+                    </button>
+                  )}
+               </div>
             </div>
 
-            <div className="glass-card p-4 space-y-4 border-accent-blue/30 relative overflow-hidden">
+            {!isShiftActive && userData?.role === 'employee' ? (
+              <div className="glass-card p-12 text-center border-dashed border-accent-blue/30 bg-accent-blue/5 animate-in fade-in zoom-in">
+                 <div className="w-16 h-16 bg-accent-blue/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-accent-blue/30 relative">
+                    <Lock size={32} className="text-accent-blue" />
+                    <div className="absolute -inset-2 bg-accent-blue/20 blur-xl animate-pulse rounded-full"></div>
+                 </div>
+                 <h3 className="text-xl font-black text-white uppercase tracking-tighter mb-2">Kasir Terkunci</h3>
+                 <p className="text-[10px] text-text-dim font-bold uppercase tracking-[0.2em] mb-8 leading-relaxed">
+                    Silakan buka sesi shift <br />
+                    untuk memulainya penjualan.
+                 </p>
+                 <button 
+                   onClick={() => setIsShiftActive(true)}
+                   className="w-full py-4 bg-accent-blue text-gray-900 rounded-2xl font-black uppercase tracking-[0.3em] text-[10px] shadow-lg shadow-accent-blue/20 hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-3"
+                 >
+                   <Sparkles size={16} />
+                   Buka Shift Sekarang
+                 </button>
+              </div>
+            ) : (
+              <>
+                <div className="glass-card p-4 space-y-4 border-accent-blue/30 relative overflow-hidden text-left">
                <div className="absolute top-0 right-0 p-2 opacity-10">
                   <QrCode size={80} />
                </div>
@@ -2979,15 +2915,16 @@ export default function App() {
                      <Camera size={32} />
                    </button>
 
-                   {/* Real-time Results POS */}
-                   {posSearchQuery.trim().length >= 2 && (
-                     <div className="absolute top-full left-0 right-0 mt-2 z-50 glass-card bg-gray-950 border border-white/20 p-2 max-h-60 overflow-y-auto shadow-2xl animate-in fade-in slide-in-from-top-2">
+                    {/* Real-time Results POS */}
+                   {posSearchQuery.trim().length >= 1 && (
+                     <div className="absolute top-full left-0 right-0 mt-2 z-50 glass-card bg-gray-950 border border-white/20 p-2 max-h-80 overflow-y-auto shadow-2xl animate-in fade-in slide-in-from-top-2">
                        {products
                          .flatMap(p => (p.variants || []).map((v: any) => ({ ...v, pName: p.name, pProvider: p.provider, pCategory: p.category, pId: p.id })))
                          .filter(v => 
-                           v.pName.toLowerCase().includes(posSearchQuery.toLowerCase()) || 
-                           v.name.toLowerCase().includes(posSearchQuery.toLowerCase()) ||
-                           (v.barcode && v.barcode.toLowerCase().includes(posSearchQuery.toLowerCase()))
+                           v.pName.toLowerCase().includes(posSearchQuery.toLowerCase().trim()) || 
+                           v.name.toLowerCase().includes(posSearchQuery.toLowerCase().trim()) ||
+                           (v.barcode && v.barcode.toLowerCase().includes(posSearchQuery.toLowerCase().trim())) ||
+                           (v.barcode && v.barcode.toLowerCase() === posSearchQuery.toLowerCase().trim())
                          )
                          .slice(0, 10)
                          .map((v, i) => (
@@ -3025,6 +2962,9 @@ export default function App() {
                                </div>
                                <div className="text-right">
                                  <p className="text-xs font-black text-white">{formatRupiah(v.sellingPrice)}</p>
+                                 {(userData?.role === 'admin' || userData?.role === 'audit') && (
+                                   <p className="text-[8px] text-accent-blue/60 font-bold">Mdl: {formatRupiah(v.modalPrice || 0)}</p>
+                                 )}
                                  <p className={`text-[8px] font-bold uppercase ${(branchInventory[`${v.pId}_${v.id}`]?.sns?.length || 0) > 0 ? 'text-green-500' : 'text-red-500'}`}>
                                    Stok: {branchInventory[`${v.pId}_${v.id}`]?.sns?.length || 0}
                                  </p>
@@ -3076,6 +3016,9 @@ export default function App() {
                     </div>
                     <div className="text-right">
                       <p className="text-xs font-bold text-accent-blue">{formatRupiah(item.price)}</p>
+                      {(userData?.role === 'admin' || userData?.role === 'audit') && (
+                        <p className="text-[8px] text-text-dim font-bold">Mdl: {formatRupiah(item.modal || 0)}</p>
+                      )}
                       <button onClick={() => setCart(prev => prev.filter((_, i) => i !== idx))} className="text-[9px] text-red-500/50 hover:text-red-500 font-bold">Batal</button>
                     </div>
                   </div>
@@ -3104,8 +3047,10 @@ export default function App() {
                 </div>
               </div>
             )}
-          </div>
-        );
+          </>
+        )}
+      </div>
+    );
       case 'restock':
         return (
           <div className="space-y-6 pb-20">
@@ -3673,17 +3618,17 @@ export default function App() {
       </div>
 
       {user && (userData?.isApproved || userData?.role === 'admin') && (
-        <nav className="fixed bottom-0 left-0 right-0 md:top-0 md:bottom-0 md:left-0 md:right-auto md:w-24 bg-gray-950/90 backdrop-blur-2xl border-t md:border-t-0 md:border-r border-white/10 p-3 md:pt-24 flex md:flex-col justify-around md:justify-start md:gap-8 shadow-2xl z-50">
+        <nav className="fixed bottom-0 left-0 right-0 md:top-0 md:bottom-0 md:left-0 md:right-auto md:w-24 bg-gray-950/90 backdrop-blur-2xl border-t md:border-t-0 md:border-r border-white/10 p-2 md:p-3 md:pt-24 flex md:flex-col justify-around md:justify-start md:gap-8 shadow-2xl z-50">
           {menuItems.map((item) => {
             const Icon = item.icon;
             return (
               <button 
                 key={item.id} 
                 onClick={() => setActiveMenu(item.id)} 
-                className={`flex flex-col items-center px-4 md:px-0 py-1 md:py-4 rounded-2xl transition-all duration-300 ${activeMenu === item.id ? 'text-accent-blue scale-110' : 'text-text-dim opacity-50 hover:opacity-100'}`}
+                className={`flex flex-col items-center justify-center p-2 rounded-2xl transition-all duration-300 ${activeMenu === item.id ? 'text-accent-blue scale-110 bg-accent-blue/10 md:bg-transparent' : 'text-text-dim opacity-50 hover:opacity-100'}`}
               >
-                <Icon size={24} strokeWidth={activeMenu === item.id ? 2.5 : 2} />
-                <span className={`text-[9px] mt-1 font-bold uppercase tracking-tighter ${activeMenu === item.id ? 'block' : 'hidden md:block opacity-50'}`}>{item.label}</span>
+                <Icon size={window.innerWidth < 768 ? 20 : 24} strokeWidth={activeMenu === item.id ? 2.5 : 2} />
+                <span className={`text-[8px] md:text-[9px] mt-1 font-bold uppercase tracking-tighter ${activeMenu === item.id ? 'block' : 'hidden md:block opacity-50'}`}>{item.label}</span>
               </button>
             );
           })}
@@ -4101,6 +4046,7 @@ export default function App() {
                           notes: handoverConfig.notes,
                           timestamp: serverTimestamp()
                        });
+                       setIsShiftActive(false);
                        setShowHandoverModal(false);
                        setHandoverConfig({ cash: 0, notes: '', shift: 'siang' });
                        setPosStatus({ message: 'Serah terima shift berhasil disimpan!', type: 'success' });
