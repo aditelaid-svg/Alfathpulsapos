@@ -3109,8 +3109,8 @@ export default function App() {
               </motion.div>
             ) : (
               <div className="space-y-8">
-                <div className="glass-card p-4 sm:p-8 space-y-6 border-white/10 relative overflow-hidden bg-gradient-to-br from-white/[0.03] to-transparent">
-                  <div className="absolute top-0 right-0 w-64 h-64 bg-sapphire/5 blur-[100px] -mr-32 -mt-32" />
+                <div className="glass-card p-4 sm:p-8 space-y-6 border-white/10 relative bg-gradient-to-br from-white/[0.03] to-transparent">
+                  <div className="absolute top-0 right-0 w-64 h-64 bg-sapphire/5 blur-[100px] -mr-32 -mt-32 overflow-hidden pointer-events-none" />
                   
                   <div className="space-y-4 relative z-10">
                     <div className="flex justify-between items-center px-1">
@@ -3543,8 +3543,8 @@ export default function App() {
                </div>
             </div>
 
-            <div className="glass-card p-12 border-white/10 relative overflow-hidden bg-gradient-to-br from-white/[0.03] to-transparent rounded-[2rem]">
-              <div className="absolute top-0 right-0 w-64 h-64 bg-sapphire/5 blur-[100px] -mr-32 -mt-32" />
+            <div className="glass-card p-12 border-white/10 relative bg-gradient-to-br from-white/[0.03] to-transparent rounded-[2rem]">
+              <div className="absolute top-0 right-0 w-64 h-64 bg-sapphire/5 blur-[100px] -mr-32 -mt-32 overflow-hidden pointer-events-none" />
               
               <div className="text-center space-y-8 relative z-10">
                 <div className="w-24 h-24 bg-sapphire/10 rounded-[2rem] flex items-center justify-center mx-auto text-sapphire border border-sapphire/20">
