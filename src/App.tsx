@@ -7,7 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { db, auth } from './firebase';
-import { collection, onSnapshot, addDoc, serverTimestamp, doc, setDoc, updateDoc, getDoc, deleteDoc, query, where, collectionGroup, getDocs, getDocFromServer } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, serverTimestamp, doc, setDoc, updateDoc, getDoc, deleteDoc, query, where, collectionGroup, getDocs, getDocFromServer, runTransaction } from 'firebase/firestore';
 import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { Sun, Moon, LayoutDashboard, ShoppingCart, Package, Store, Settings, Plus, ChevronRight, Hash, QrCode, UserCheck, ShieldAlert, MapPin, Trash2, Camera, X, Sparkles, ArrowLeftRight, RotateCcw, FileText, History, LogOut, TrendingUp, Wallet, PieChart, Activity, Coins, FileSpreadsheet, AlertTriangle, Pencil, ShieldCheck, Search, Scan, ChevronDown, BarChart3, LayoutGrid, ArrowRight, Lock } from 'lucide-react';
 import CameraScanner from './components/CameraScanner';
@@ -2793,27 +2793,36 @@ export default function App() {
                           </div>
 
                           <div className="flex gap-2">
-                            <button 
-                              onClick={() => {
+                             <button 
+                              onClick={async () => {
                                 if (!batchSNConfig.sn || !selectedBranch) return;
                                 const itemRef = doc(db, `branches/${selectedBranch}/inventory`, `${viewState.product.id}_${viewState.variant.id}`);
-                                const currentData = branchInventory[`${viewState.product.id}_${viewState.variant.id}`] || { sns: [] };
                                 
-                                // Create array with same SN multiple times to increase stock count
-                                const newSns = [...currentData.sns, ...new Array(batchSNConfig.qty).fill(batchSNConfig.sn)];
-                                
-                                setDoc(itemRef, {
-                                  productId: viewState.product.id,
-                                  variantId: viewState.variant.id,
-                                  sns: newSns,
-                                  stock: newSns.length,
-                                  lastUpdated: serverTimestamp()
-                                });
-                                setBatchSNConfig({ sn: '', qty: 1 });
-                                setShowBatchSN(false);
-                                const dispName = viewState.product.category === 'aksesoris' ? `${viewState.product.provider} ${viewState.variant.name} ${viewState.product.name}` : `${viewState.product.name} - ${viewState.variant.name}`;
-                                setPosStatus({ message: `📦 Batch Masuk: ${batchSNConfig.qty} Pcs ${dispName}`, type: 'success' });
-                                setTimeout(() => setPosStatus({ message: '', type: 'info' }), 4000);
+                                try {
+                                  await runTransaction(db, async (transaction) => {
+                                    const itemDoc = await transaction.get(itemRef);
+                                    const currentData = itemDoc.exists() ? itemDoc.data() : { sns: [] };
+                                    
+                                    const newSns = [...(currentData.sns || []), ...new Array(batchSNConfig.qty).fill(batchSNConfig.sn)];
+                                    
+                                    transaction.set(itemRef, {
+                                      productId: viewState.product.id,
+                                      variantId: viewState.variant.id,
+                                      sns: newSns,
+                                      stock: newSns.length,
+                                      lastUpdated: serverTimestamp()
+                                    });
+                                  });
+                                  
+                                  setBatchSNConfig({ sn: '', qty: 1 });
+                                  setShowBatchSN(false);
+                                  const dispName = viewState.product.category === 'aksesoris' ? `${viewState.product.provider} ${viewState.variant.name} ${viewState.product.name}` : `${viewState.product.name} - ${viewState.variant.name}`;
+                                  setPosStatus({ message: `📦 Batch Masuk: ${batchSNConfig.qty} Pcs ${dispName}`, type: 'success' });
+                                  setTimeout(() => setPosStatus({ message: '', type: 'info' }), 4000);
+                                } catch (e) {
+                                  console.error("Batch SN update failed: ", e);
+                                  setPosStatus({ message: "Gagal menyimpan batch SN", type: 'error' });
+                                }
                               }}
                               className="flex-1 bg-accent-blue text-slate-200 py-3 rounded-xl font-bold text-[10px] uppercase tracking-widest"
                             >
@@ -2982,40 +2991,42 @@ export default function App() {
                   updates[key].push(item);
                 });
 
-                for (const key in updates) {
-                  const itemsToSell = updates[key];
-                  const itemRef = doc(db, `branches/${selectedBranch}/inventory`, key);
-                  const currentData = branchInventory[key];
-                  const category = itemsToSell[0].category;
-                  
-                  if (category === 'aksesoris') {
-                    // For bulk accessories, just decrement numeric stock
-                    await updateDoc(itemRef, {
-                      stock: Math.max(0, (currentData?.stock || 0) - itemsToSell.length),
-                      lastUpdated: serverTimestamp()
-                    });
-                  } else {
-                    // For Voucher/Perdana, remove specific SNs from array one by one
-                    const snsToRemove = itemsToSell.map(i => i.sn);
-                    const existingSns = [...(currentData?.sns || [])];
-                    const finalSns = [];
-                    
-                    for (const sn of existingSns) {
-                      const idx = snsToRemove.indexOf(sn);
-                      if (idx > -1) {
-                        snsToRemove.splice(idx, 1);
-                      } else {
-                        finalSns.push(sn);
-                      }
-                    }
+                await runTransaction(db, async (transaction) => {
+                  for (const key in updates) {
+                    const itemsToSell = updates[key];
+                    const itemRef = doc(db, `branches/${selectedBranch}/inventory`, key);
+                    const itemDoc = await transaction.get(itemRef);
+                    if (!itemDoc.exists()) throw new Error("Stok tidak ditemukan");
+                    const currentData = itemDoc.data();
+                    const category = itemsToSell[0].category;
 
-                    await updateDoc(itemRef, {
-                      sns: finalSns,
-                      stock: finalSns.length,
-                      lastUpdated: serverTimestamp()
-                    });
+                    if (category === 'aksesoris') {
+                      transaction.update(itemRef, {
+                        stock: Math.max(0, (currentData.stock || 0) - itemsToSell.length),
+                        lastUpdated: serverTimestamp()
+                      });
+                    } else {
+                      const snsToRemove = itemsToSell.map(i => i.sn);
+                      const existingSns = [...(currentData.sns || [])];
+                      const finalSns = [];
+                      
+                      for (const sn of existingSns) {
+                        const idx = snsToRemove.indexOf(sn);
+                        if (idx > -1) {
+                          snsToRemove.splice(idx, 1);
+                        } else {
+                          finalSns.push(sn);
+                        }
+                      }
+                      
+                      transaction.update(itemRef, {
+                        sns: finalSns,
+                        stock: finalSns.length,
+                        lastUpdated: serverTimestamp()
+                      });
+                    }
                   }
-                }
+                });
 
                 // Add to Global Transactions
                 const txData: any = {
@@ -3073,11 +3084,10 @@ export default function App() {
                   {isShiftActive && (
                     <button 
                        onClick={() => setShowHandoverModal(true)}
-                       className="p-3 bg-red-500/5 text-red-500 rounded-2xl border border-red-500/10 hover:bg-red-500 hover:text-slate-200 transition group relative overflow-hidden"
-                       title="Selesaikan Sesi"
+                       className="px-4 py-2 bg-red-500/10 text-red-500 rounded-lg border border-red-500/10 hover:bg-red-500 hover:text-slate-200 transition text-[10px] font-bold uppercase tracking-widest flex items-center gap-2"
                     >
-                       <div className="absolute inset-0 bg-red-500/10 blur-xl opacity-0 group-hover:opacity-100 transition-opacity" />
-                       <RotateCcw size={16} className="relative z-10 group-hover:rotate-180 transition-transform duration-700" />
+                       <RotateCcw size={12} />
+                       Tutup / Opersift (Serah Terima)
                     </button>
                   )}
                </div>
@@ -3157,7 +3167,7 @@ export default function App() {
                         <motion.div 
                           initial={{ opacity: 0, y: 10 }}
                           animate={{ opacity: 1, y: 0 }}
-                          className="absolute top-full left-0 right-0 mt-4 z-50 glass-card bg-[#0A0A0B] border border-white/10 p-4 max-h-[60vh] overflow-y-auto shadow-[0_30px_100px_rgba(0,0,0,0.8)] rounded-[2rem] space-y-2 scrollbar-hide"
+                          className="absolute top-full left-0 right-0 mt-4 z-[200] glass-card bg-[#0A0A0B] border border-white/10 p-4 max-h-[60vh] overflow-y-auto shadow-[0_30px_100px_rgba(0,0,0,0.8)] rounded-[2rem] space-y-2 scrollbar-hide"
                         >
                           <div className="px-4 py-2 border-b border-white/5 mb-2">
                             <p className="text-[9px] font-black text-slate-200/30 uppercase tracking-[0.3em]">Query Results</p>
@@ -4279,7 +4289,7 @@ export default function App() {
           <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setShowHandoverModal(false)}></div>
           <div className="relative glass-card w-full max-w-sm p-4 sm:p-6 space-y-6 border border-white/10 animate-in zoom-in duration-300 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-2">
-               <h3 className="text-sm font-black text-slate-200 uppercase tracking-widest">Serah Terima Shift</h3>
+               <h3 className="text-sm font-black text-slate-200 uppercase tracking-widest">Tutup / Serah Terima Shift</h3>
                <button onClick={() => setShowHandoverModal(false)} className="text-text-dim hover:text-slate-200"><X size={20}/></button>
             </div>
 

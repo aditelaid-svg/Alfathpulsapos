@@ -2,73 +2,74 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // ===============================================================
-    // Helper Functions
-    // ===============================================================
-    function isAuthenticated() {
-       return request.auth != null;
-    }
 
+    // ===============================================================
+    // Global Hardened Helpers
+    // ===============================================================
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(uid) { return isSignedIn() && request.auth.uid == uid; }
+    
     function getUserData() {
        return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
     function isAdmin() {
-      return isAuthenticated() && 
+      return isSignedIn() && 
              (request.auth.token.email == "aditelaid@gmail.com" || 
              (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'admin'));
     }
 
     function isAudit() {
-      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'audit';
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'audit';
     }
 
     function isEmployee() {
-      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'employee' && getUserData().isApproved == true;
-    }
-
-    function isApproved() {
-      return isAdmin() || isAudit() || isEmployee();
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'employee' && getUserData().isApproved == true;
     }
 
     function isBranchMember(branchId) {
       return isAdmin() || isAudit() || (isEmployee() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().branchId == branchId);
     }
+    
+    // Schema Validator Helpers
+    function isValidProduct(data) {
+      return data.name is string && data.category is string && data.provider is string;
+    }
 
     // ===============================================================
-    // Rules
+    // Fortress Rules
     // ===============================================================
+    
+    // Default Deny
+    match /{document=**} { allow read, write: if false; }
 
     match /products/{productId} {
-      allow read: if isApproved();
-      allow write: if isAdmin(); // Bos only manages the catalog
+      allow read: if isSignedIn() && (isAdmin() || isAudit() || isEmployee());
+      allow create, update: if isAdmin() && isValidProduct(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /branches/{branchId} {
+      allow read: if isSignedIn() && (isAdmin() || isAudit() || isEmployee());
+      allow write: if isAdmin();
     }
 
     match /branches/{branchId}/inventory/{itemId} {
       allow read: if isBranchMember(branchId);
-      // Auditor can manage stock. Employees can only update (deduct) via POS or logs.
-      allow write: if isAdmin() || isAudit() || (isEmployee() && getUserData().branchId == branchId);
-    }
-
-    // Collection Group rule for inventory queries across all branches (Admin/Audit only)
-    match /{path=**}/inventory/{itemId} {
-      allow read: if isAdmin() || isAudit();
-    }
-
-    match /branches/{branchId} {
-      allow read: if isApproved();
-      allow write: if isAdmin();
+      
+      // Kasir tidak boleh menulis langsung ke dokumen inventaris. 
+      // Mereka hanya boleh lewat transaksi POS (via transaksi/transfers/disposals)
+      allow write: if isAdmin() || isAudit();
     }
 
     match /transactions/{transactionId} {
       allow read: if isAdmin() || isAudit() || (isEmployee() && resource.data.branchId == getUserData().branchId);
-      allow create: if isEmployee();
+      allow create: if isEmployee() && request.resource.data.branchId == getUserData().branchId;
     }
 
     match /transfers/{transferId} {
       allow read: if isAdmin() || isAudit();
-      allow write: if isAdmin() || isAudit();
+      allow create: if isEmployee() || isAdmin();
     }
 
     match /disposals/{disposalId} {
@@ -77,20 +78,20 @@ service cloud.firestore {
     }
     
     match /users/{userId} {
-      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
-      allow create: if isAuthenticated() && request.auth.uid == userId;
-      allow update: if isAdmin(); // Only Bos approves or changes roles
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isSignedIn() && isOwner(userId);
+      allow update: if (isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin();
     }
 
     match /handovers/{handoverId} {
-      allow read: if isAdmin() || isAudit();
+      allow read: if isAdmin() || isAudit() || (isEmployee() && resource.data.branchId == getUserData().branchId);
       allow create: if isEmployee();
       allow delete: if isAdmin();
     }
 
     match /audit_logs/{logId} {
       allow read: if isAdmin() || isAudit();
-      allow create: if isAdmin() || isAudit();
+      allow create: if isAdmin() || isAudit() || isEmployee();
     }
   }
 }
