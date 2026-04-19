@@ -3057,7 +3057,7 @@ export default function App() {
         };
 
         return (
-          <div className="space-y-8 pb-32 animate-in fade-in duration-1000">
+          <div className="space-y-8 pb-[280px] animate-in fade-in duration-1000">
             <div className="flex justify-between items-end px-1">
                <div>
                   <p className="text-[10px] font-black text-sapphire uppercase tracking-[0.4em] mb-1">Point of Sale</p>
@@ -3157,7 +3157,7 @@ export default function App() {
                         <motion.div 
                           initial={{ opacity: 0, y: 10 }}
                           animate={{ opacity: 1, y: 0 }}
-                          className="absolute top-full left-0 right-0 mt-4 z-50 glass-card bg-[#0A0A0B] border border-white/10 p-4 max-h-[500px] overflow-y-auto shadow-[0_30px_100px_rgba(0,0,0,0.8)] rounded-[2rem] space-y-2 scrollbar-hide"
+                          className="absolute top-full left-0 right-0 mt-4 z-50 glass-card bg-[#0A0A0B] border border-white/10 p-4 max-h-[60vh] overflow-y-auto shadow-[0_30px_100px_rgba(0,0,0,0.8)] rounded-[2rem] space-y-2 scrollbar-hide"
                         >
                           <div className="px-4 py-2 border-b border-white/5 mb-2">
                             <p className="text-[9px] font-black text-slate-200/30 uppercase tracking-[0.3em]">Query Results</p>
@@ -3257,7 +3257,7 @@ export default function App() {
                     )}
                   </div>
 
-                  <div className="space-y-4 max-h-[500px] overflow-y-auto scrollbar-hide py-2">
+                  <div className="space-y-4 py-2">
                     {cart.length > 0 ? cart.map((item, idx) => (
                       <motion.div 
                         initial={{ opacity: 0, x: 20 }}
@@ -3308,7 +3308,7 @@ export default function App() {
               <motion.div 
                 initial={{ opacity: 0, y: 50 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="fixed bottom-24 left-6 right-6 z-50"
+                className="fixed bottom-24 left-4 right-4 md:left-1/2 md:right-auto md:-translate-x-1/2 md:w-full md:max-w-[calc(36rem-4rem)] z-50"
               >
                 <div className="glass-card p-4 sm:p-6 border-sapphire/40 shadow-[0_50px_100px_rgba(37,99,235,0.3)] space-y-6 bg-[#0B0B0C]/90 backdrop-blur-3xl rounded-[2.5rem] border-2">
                   <div className="flex justify-between items-center px-4">
