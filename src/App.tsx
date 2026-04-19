@@ -3579,7 +3579,7 @@ export default function App() {
 
                   {/* Real-time Results Audit */}
                   {auditSearchQuery.trim().length >= 2 && (
-                    <div className="absolute top-full left-0 right-0 mt-4 z-50 glass-card bg-[#0A0A0B] border border-white/10 p-2 max-h-80 overflow-y-auto shadow-[0_30px_100px_rgba(0,0,0,0.8)] rounded-[2rem] scrollbar-hide">
+                    <div className="absolute top-full left-0 right-0 mt-4 z-[100] glass-card bg-[#0A0A0B] border border-white/10 p-2 max-h-80 overflow-y-auto shadow-[0_30px_100px_rgba(0,0,0,0.8)] rounded-[2rem] scrollbar-hide">
                       {products
                         .flatMap(p => (p.variants || []).map((v: any) => ({ ...v, pName: p.name, pProvider: p.provider, pCategory: p.category, pId: p.id, productFull: p })))
                         .filter(v => 
@@ -3631,22 +3631,6 @@ export default function App() {
               </button>
             </div>
 
-            <div className="space-y-6">
-              <h4 className="text-[9px] font-black text-slate-200/20 uppercase tracking-[0.3em] px-2">Operational Protocol</h4>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {[
-                  { title: "Define Node", desc: "Select active terminal node via system dashboard." },
-                  { title: "Verify Master", desc: "Scan barcode to pull total inventory metrics." },
-                  { title: "Validate SN", desc: "Scan unique serial to confirm cryptographic link." }
-                ].map((step, i) => (
-                  <div key={i} className="glass-card p-4 sm:p-6 border-white/5 bg-gradient-to-b from-white/[0.02] to-transparent rounded-[2rem]">
-                    <div className="w-10 h-10 rounded-xl bg-sapphire/10 flex items-center justify-center text-sapphire font-black mb-4 border border-sapphire/20">{i + 1}</div>
-                    <p className="text-[10px] text-slate-200 font-bold uppercase tracking-widest mb-2">{step.title}</p>
-                    <p className="text-[10px] text-slate-200/30 font-medium leading-relaxed">{step.desc}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
           </div>
         );
       case 'history':
@@ -3657,7 +3641,7 @@ export default function App() {
         const sortedAuditLogs = auditLogs.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
 
         return (
-          <div className="space-y-6 pb-20">
+          <div className="space-y-6 pb-40">
             <div className="flex justify-between items-center bg-gray-900/40 p-3 rounded-2xl border border-white/5">
               <h2 className="text-xl font-black text-text-dim tracking-tight flex items-center gap-2">
                 <History size={20} className="text-sapphire" /> RIWAYAT
