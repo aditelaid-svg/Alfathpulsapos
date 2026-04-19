@@ -16,15 +16,16 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() && 
-             (request.auth.token.email == "aditelaid@gmail.com" || getUserData().role == 'admin');
+             (request.auth.token.email == "aditelaid@gmail.com" || 
+             (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'admin'));
     }
 
     function isAudit() {
-      return isAuthenticated() && getUserData().role == 'audit';
+      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'audit';
     }
 
     function isEmployee() {
-      return isAuthenticated() && getUserData().role == 'employee' && getUserData().isApproved == true;
+      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'employee' && getUserData().isApproved == true;
     }
 
     function isApproved() {
@@ -32,7 +33,7 @@ service cloud.firestore {
     }
 
     function isBranchMember(branchId) {
-      return isAdmin() || isAudit() || (isEmployee() && getUserData().branchId == branchId);
+      return isAdmin() || isAudit() || (isEmployee() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().branchId == branchId);
     }
 
     // ===============================================================

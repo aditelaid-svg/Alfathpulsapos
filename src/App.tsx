@@ -9,7 +9,7 @@ import * as XLSX from 'xlsx';
 import { db, auth } from './firebase';
 import { collection, onSnapshot, addDoc, serverTimestamp, doc, setDoc, updateDoc, getDoc, deleteDoc, query, where, collectionGroup, getDocs, getDocFromServer } from 'firebase/firestore';
 import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
-import { Sun, Moon, LayoutDashboard, ShoppingCart, Package, Store, Settings, Plus, ChevronRight, Hash, QrCode, UserCheck, ShieldAlert, MapPin, Trash2, Camera, X, Sparkles, ArrowLeftRight, RotateCcw, FileText, History, LogOut, TrendingUp, Wallet, PieChart, Activity, Coins, FileSpreadsheet, AlertTriangle, Pencil, ShieldCheck, Search, Scan, ChevronDown, BarChart3, LayoutGrid, ArrowRight } from 'lucide-react';
+import { Sun, Moon, LayoutDashboard, ShoppingCart, Package, Store, Settings, Plus, ChevronRight, Hash, QrCode, UserCheck, ShieldAlert, MapPin, Trash2, Camera, X, Sparkles, ArrowLeftRight, RotateCcw, FileText, History, LogOut, TrendingUp, Wallet, PieChart, Activity, Coins, FileSpreadsheet, AlertTriangle, Pencil, ShieldCheck, Search, Scan, ChevronDown, BarChart3, LayoutGrid, ArrowRight, Lock } from 'lucide-react';
 import CameraScanner from './components/CameraScanner';
 
 enum OperationType {

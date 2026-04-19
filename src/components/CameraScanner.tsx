@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Html5QrcodeScanner } from 'html5-qrcode';
+import { BrowserMultiFormatReader } from '@zxing/browser';
 import { X } from 'lucide-react';
 
 interface CameraScannerProps {
@@ -9,35 +9,38 @@ interface CameraScannerProps {
 }
 
 export default function CameraScanner({ onScan, onClose, title }: CameraScannerProps) {
-  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const controlsRef = useRef<any>(null);
 
   useEffect(() => {
-    // Initialize scanner
-    const config = { 
-      fps: 10, 
-      qrbox: { width: 250, height: 250 },
-      aspectRatio: 1.0
-    };
-    
-    scannerRef.current = new Html5QrcodeScanner(
-      "reader", 
-      config, 
-      /* verbose= */ false
-    );
+    let isComponentMounted = true;
+    const codeReader = new BrowserMultiFormatReader();
 
-    const onScanSuccess = (decodedText: string) => {
-      onScan(decodedText);
-      // Optional: beep or vibrate
-      if (window.navigator.vibrate) window.navigator.vibrate(100);
+    const startScanner = async () => {
+      try {
+        if (videoRef.current) {
+          controlsRef.current = await codeReader.decodeFromVideoDevice(
+            undefined, 
+            videoRef.current, 
+            (result, error, controls) => {
+              if (result && isComponentMounted) {
+                onScan(result.getText());
+                if (window.navigator.vibrate) window.navigator.vibrate(100);
+              }
+            }
+          );
+        }
+      } catch (err) {
+        console.error("Failed to start camera scanner", err);
+      }
     };
 
-    scannerRef.current.render(onScanSuccess, (error) => {
-      // Ignore errors (scanning keeps going)
-    });
+    startScanner();
 
     return () => {
-      if (scannerRef.current) {
-        scannerRef.current.clear().catch(err => console.error("Failed to clear scanner", err));
+      isComponentMounted = false;
+      if (controlsRef.current) {
+        controlsRef.current.stop();
       }
     };
   }, []);
@@ -53,11 +56,17 @@ export default function CameraScanner({ onScan, onClose, title }: CameraScannerP
           </button>
         </div>
         
-        <div className="p-2 bg-black">
-          <div id="reader" className="w-full"></div>
+        <div className="p-2 bg-black flex items-center justify-center relative min-h-[250px]">
+          <video 
+            ref={videoRef} 
+            className="w-full h-full object-cover rounded-lg aspect-square"
+            playsInline
+            muted
+          />
+          <div className="absolute inset-0 pointer-events-none border-2 border-accent-blue/30 m-8 rounded-xl opacity-50" />
         </div>
         
-        <div className="p-4 bg-gray-900/80 text-center">
+        <div className="p-4 bg-gray-900/80 text-center relative z-10">
           <p className="text-[10px] text-text-dim uppercase font-bold tracking-widest">Arahkan kamera ke Kode QR atau Barcode</p>
         </div>
       </div>

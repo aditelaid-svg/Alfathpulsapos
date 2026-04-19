@@ -1,4 +1,4 @@
-const CACHE_NAME = 'alpatpulsa-v2';
+const CACHE_NAME = 'alpatpulsa-v3-bypass';
 const urlsToCache = [
   '/',
   '/index.html',
