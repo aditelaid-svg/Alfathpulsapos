@@ -1,37 +1,45 @@
 @import "tailwindcss";
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
 
 @theme {
-  --font-sans: 'Inter', sans-serif;
-  --color-glass-bg: rgba(255, 255, 255, 0.12);
-  --color-glass-border: rgba(255, 255, 255, 0.25);
-  --color-accent-blue: #00f2ff;
-  --color-text-main: #ffffff;
-  --color-text-dim: rgba(255, 255, 255, 0.6);
+  --font-sans: 'Inter', system-ui, sans-serif;
+  
+  /* Dark Premium Blue Palette */
+  --color-slate-900: #0f172a;
+  --color-slate-50: #f8fafc;
+  --color-obsidian: #05080f;
+  --color-glass-border: rgba(255, 255, 255, 0.1);
+  --color-error: #ef4444;
+  --color-success: #22c55e;
+  
+  /* Deep Navy Backgrounds */
+  --color-bg-main: #0B1120;
+  --color-card-bg: #1E293B;
+  
+  /* Accents - Softer Blue */
+  --color-sapphire: #3B82F6;
+  --color-accent-blue: #3B82F6;
+  --color-subtle-border: #334155;
+  
+  /* Text - Muted White/Slate */
+  --color-text-main: #CBD5E1; 
+  --color-text-dim: #64748B;
 }
 
 body {
-  background: #0a0a0b;
+  background-color: #0B1120;
   color: var(--color-text-main);
   font-family: var(--font-sans);
   min-height: 100vh;
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
 }
 
-.glass-card {
-  background: var(--color-glass-bg);
-  backdrop-filter: blur(16px);
-  border: 1px solid var(--color-glass-border);
-  border-radius: 20px;
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-}
-
-@keyframes loading-bar {
-  0% { transform: translateX(-100%); }
-  50% { transform: translateX(0); }
-  100% { transform: translateX(100%); }
-}
-
-.animate-loading-bar {
-  animation: loading-bar 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-}
+/* Updating broad background styles to use theme colors */
+.bg-white\/5 { background-color: var(--color-card-bg); }
+.bg-white\/\[0\.02\] { background-color: #1a2436; }
+.bg-white\/\[0\.03\] { background-color: #26334a; }
+.border-white\/5 { border-color: var(--color-subtle-border); }
+.border-white\/10 { border-color: var(--color-subtle-border); }
+.text-text-dim { color: var(--color-text-dim); }
