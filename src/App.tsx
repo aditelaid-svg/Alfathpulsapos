@@ -3361,7 +3361,8 @@ export default function App() {
             </div>
 
             <div className="glass-card overflow-hidden border-white/5 bg-black/40 backdrop-blur-3xl rounded-[2rem]">
-              <table className="w-full text-left border-collapse">
+              <div className="overflow-x-auto scrollbar-hide">
+                <table className="w-full text-left border-collapse min-w-[700px]">
                 <thead>
                   <tr className="bg-[#151c2c]">
                     <th className="p-4 sm:p-6 text-[9px] font-black text-slate-200/40 uppercase tracking-[0.2em] border-b border-white/5">Deployment Node</th>
@@ -3416,6 +3417,7 @@ export default function App() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           </div>
         );
@@ -3471,7 +3473,8 @@ export default function App() {
                     </div>
 
                     <div className="glass-card overflow-hidden border-white/5 bg-black/30 rounded-[2rem]">
-                      <table className="w-full text-left border-collapse">
+                      <div className="overflow-x-auto scrollbar-hide">
+                        <table className="w-full text-left border-collapse min-w-[800px]">
                         <thead>
                           <tr className="bg-[#151c2c]">
                             <th className="p-4 sm:p-6 text-[9px] font-black text-slate-200/40 uppercase tracking-widest border-b border-white/5">Handover Event</th>
@@ -3523,6 +3526,7 @@ export default function App() {
                           ))}
                         </tbody>
                       </table>
+                      </div>
                     </div>
                   </div>
                 );
@@ -3924,7 +3928,7 @@ export default function App() {
       </div>
 
       {user && (userData?.isApproved || userData?.role === 'admin') && (
-        <nav className="fixed bottom-0 left-0 right-0 md:top-0 md:bottom-0 md:left-0 md:right-auto md:w-24 bg-obsidian border-t md:border-t-0 md:border-r border-white/5 p-2 md:p-3 md:pt-24 flex md:flex-col justify-around md:justify-start md:gap-8 shadow-[20px_0_50px_rgba(0,0,0,0.5)] z-50">
+        <nav className="fixed bottom-0 left-0 right-0 md:top-0 md:bottom-0 md:left-0 md:right-auto md:w-24 bg-obsidian border-t md:border-t-0 md:border-r border-white/5 p-2 md:p-3 md:pt-24 flex md:flex-col overflow-x-auto overflow-y-hidden justify-start md:justify-start gap-2 sm:gap-6 md:gap-8 shadow-[20px_0_50px_rgba(0,0,0,0.5)] z-50 scrollbar-hide">
           {menuItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeMenu === item.id;
@@ -3932,7 +3936,7 @@ export default function App() {
               <button 
                 key={item.id} 
                 onClick={() => setActiveMenu(item.id)} 
-                className={`flex flex-col items-center justify-center p-3 rounded-2xl transition-all duration-500 relative group`}
+                className={`shrink-0 min-w-[64px] sm:min-w-[72px] flex flex-col items-center justify-center p-2 sm:p-3 rounded-2xl transition-all duration-500 relative group`}
               >
                 {isActive && (
                   <motion.div 
