@@ -1437,22 +1437,6 @@ export default function App() {
                   <p className="text-3xl font-black tracking-tighter text-slate-200">{branchDailySales} <span className="text-[10px] text-text-dim font-bold uppercase tracking-tight">Tx</span></p>
                 </div>
             </div>
-
-            <section className="bg-obsidian border border-white/5 p-4 sm:p-8 rounded-[2.5rem] relative overflow-hidden group shadow-2xl">
-               <motion.div 
-                animate={{ scale: [1, 1.1, 1], opacity: [0.1, 0.2, 0.1] }}
-                transition={{ duration: 10, repeat: Infinity }}
-                className="absolute top-0 right-0 p-4 sm:p-8 text-sapphire"
-               >
-                 <Sparkles size={160} />
-               </motion.div>
-               <h3 className="text-[10px] font-black text-sapphire uppercase tracking-[0.4em] relative z-10 mb-2">Daily Node Revenue</h3>
-               <p className="text-4xl font-black tracking-tighter text-slate-200 relative z-10">{formatRupiah(branchDailyRevenue)}</p>
-               <div className="flex items-center gap-2 mt-6 relative z-10">
-                  <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                  <p className="text-[8px] text-text-dim uppercase font-bold tracking-[0.2em]">Secure Ledger Connection Active</p>
-               </div>
-            </section>
           </div>
         );
       case 'system':

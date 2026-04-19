@@ -78,8 +78,10 @@ service cloud.firestore {
     }
     
     match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow create: if isSignedIn() && isOwner(userId);
+      // Allow read if owner OR admin. 
+      // Changed from isOwner() helper to explicit check to avoid potential get() calls on self in some contexts.
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow create: if isSignedIn() && request.auth.uid == userId;
       allow update: if (isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin();
     }
 
