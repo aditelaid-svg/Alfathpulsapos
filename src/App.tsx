@@ -1457,7 +1457,7 @@ export default function App() {
         );
       case 'system':
         return (
-          <div className="space-y-8 pb-32 px-1">
+          <div className="space-y-8 pb-48 px-1">
             <section className="space-y-4">
               <div className="flex justify-between items-center">
                 <h2 className="text-xl font-semibold text-text-dim">Kelola Cabang</h2>
@@ -1637,9 +1637,9 @@ export default function App() {
                               const newBId = prompt("ID Cabang baru (atau biarkan kosong):");
                               if (newBId !== null) updateDoc(doc(db, 'users', u.id), { branchId: newBId });
                             }}
-                            className="p-2 text-text-dim hover:text-slate-200"
+                            className="p-3 text-text-dim hover:text-slate-200 active:scale-95 transition-transform"
                           >
-                            <Settings size={14} />
+                            <Settings size={18} />
                           </button>
                         )}
                       </div>
@@ -1654,7 +1654,7 @@ export default function App() {
                       <History size={14} className="text-sapphire" />
                    </div>
                    
-                   <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1 custom-scrollbar">
+                   <div className="space-y-2 pr-1">
                       {handovers.length === 0 ? (
                         <div className="p-4 sm:p-8 text-center text-text-dim text-[10px] uppercase font-bold border border-dashed border-white/10 rounded-2xl">
                            Belum ada data serah terima.
@@ -3849,7 +3849,7 @@ export default function App() {
 
   return (
     <div 
-      className="min-h-screen bg-[#0B1120] text-slate-100 pb-24 md:pb-0 md:pl-24 font-sans selection:bg-sapphire/20 overflow-x-hidden"
+      className="min-h-screen bg-[#0B1120] text-slate-100 pb-32 md:pb-0 md:pl-24 font-sans selection:bg-sapphire/20 overflow-x-hidden"
       style={{ WebkitTapHighlightColor: 'transparent' }}
     >
       {/* App Loader - Luxury Revamp */}
