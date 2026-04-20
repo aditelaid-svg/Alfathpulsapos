@@ -154,6 +154,16 @@ export default function App() {
   const [posScannerInput, setPosScannerInput] = useState('');
   const [posSearchQuery, setPosSearchQuery] = useState('');
   const [auditSearchQuery, setAuditSearchQuery] = useState('');
+  
+  // AUDIT SESSION STATE
+  const [auditSession, setAuditSession] = useState<{
+    active: boolean,
+    branchId: string | null,
+    scannedSNs: string[],
+    results: any[],
+    startTime: any
+  }>({ active: false, branchId: null, scannedSNs: [], results: [], startTime: null });
+
   const [cart, setCart] = useState<any[]>([]);
   const [posStatus, setPosStatus] = useState({ message: '', type: 'info' });
   const [showCameraScanner, setShowCameraScanner] = useState<'stock' | 'pos' | 'stock-initial' | 'audit' | 'barcode-master' | null>(null);
@@ -1097,6 +1107,21 @@ export default function App() {
   const handleAuditScan = async (snInput: string) => {
     const sn = snInput.trim();
     try {
+      // Jika Audit Session sedang aktif, tambahkan ke scanned list
+      if (auditSession.active) {
+        if (auditSession.scannedSNs.includes(sn)) {
+          setPosStatus({ message: `⚠️ SN ${sn} sudah dipindai dalam sesi ini`, type: 'info' });
+          return;
+        }
+        setAuditSession(prev => ({
+          ...prev,
+          scannedSNs: [...prev.scannedSNs, sn]
+        }));
+        setPosStatus({ message: `🎯 Terdeteksi: ${sn}`, type: 'success' });
+        return;
+      }
+
+      // Mode audit biasa (Pencarian Global)
       // 1. Cari di Inventory (Stok Aktif)
       const invQuery = query(collectionGroup(db, 'inventory'), where('sns', 'array-contains', sn));
       const invSnap = await getDocs(invQuery);
@@ -3666,6 +3691,51 @@ export default function App() {
           </div>
         );
       case 'audit_center':
+        const currentAuditBranch = branches.find(b => b.id === (auditSession.branchId || selectedBranch));
+        
+        // Calculate Audit Discrepancy
+        const auditResults = auditSession.active ? (() => {
+          const branchTargetId = auditSession.branchId || selectedBranch;
+          if (!branchTargetId) return [];
+          
+          // Get all SNs expected in this branch
+          const expectedSNs: {sn: string, pName: string, vName: string, pId: string, vId: string}[] = [];
+          Object.entries(branchInventory).forEach(([key, inv]: [string, any]) => {
+            if (inv.branchId === branchTargetId && inv.sns?.length > 0) {
+              const p = products.find(prod => prod.id === inv.productId);
+              const v = p?.variants?.find((varItem: any) => varItem.id === inv.variantId);
+              inv.sns.forEach((snVal: string) => {
+                expectedSNs.push({
+                  sn: snVal,
+                  pName: p?.name || 'Unknown',
+                  vName: v?.name || v?.description || 'Unknown',
+                  pId: inv.productId,
+                  vId: inv.variantId
+                });
+              });
+            }
+          });
+
+          // Compare
+          const report = expectedSNs.map(ex => ({
+            ...ex,
+            found: auditSession.scannedSNs.includes(ex.sn)
+          }));
+
+          // Items scanned but NOT in expected list
+          const extraSNs = auditSession.scannedSNs.filter(s => !expectedSNs.find(ex => ex.sn === s)).map(s => {
+            // Try to identify what it is from master catalog
+            let identified = { pName: 'Unknown', vName: 'Unknown' };
+            for(const prog of products) {
+              const vFound = prog.variants?.find((vSingle: any) => vSingle.barcode === s);
+              if (vFound) { identified = { pName: prog.name, vName: vFound.name }; break; }
+            }
+            return { sn: s, ...identified, found: true, extra: true };
+          });
+
+          return [...report, ...extraSNs];
+        })() : [];
+
         return (
           <div className="space-y-8 pb-32 animate-in fade-in duration-700">
             <div className="flex justify-between items-end px-1">
@@ -3675,22 +3745,141 @@ export default function App() {
                     Audit <span className="text-sapphire">Center</span>
                   </h2>
                </div>
-               <div className="text-[10px] bg-[#151c2c] text-slate-200/60 px-4 py-2 rounded-full font-bold border border-white/10 uppercase tracking-widest backdrop-blur-md">
-                 {branches.find(b => b.id === selectedBranch)?.name || 'Central Node'}
+               <div className="flex flex-col items-end gap-1">
+                 <p className="text-[8px] text-text-dim uppercase font-black tracking-widest">Active Node</p>
+                 <div className="text-[10px] bg-[#151c2c] text-sapphire px-4 py-2 rounded-full font-black border border-white/10 uppercase tracking-widest backdrop-blur-md">
+                   {currentAuditBranch?.name || 'Central Node'}
+                 </div>
                </div>
             </div>
 
+            {/* Audit Status / Session Controls */}
+            {!auditSession.active ? (
+              <div className="glass-card p-8 border-white/10 bg-gradient-to-br from-sapphire/5 to-transparent">
+                 <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
+                    <div className="space-y-2 text-center sm:text-left">
+                       <h3 className="text-sm font-black uppercase tracking-widest text-slate-200">Mode Audit Fisik (Stock Opname)</h3>
+                       <p className="text-[10px] text-text-dim font-bold leading-relaxed max-w-sm">
+                         Mulai sesi audit untuk membandingkan stok fisik di <span className="text-sapphire">{currentAuditBranch?.name}</span> dengan data sistem Alpatpulsa.
+                       </p>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        if (!selectedBranch) {
+                          setPosStatus({ message: "Pilih cabang terlebih dahulu!", type: 'error' });
+                          return;
+                        }
+                        setAuditSession({
+                          active: true,
+                          branchId: selectedBranch,
+                          scannedSNs: [],
+                          results: [],
+                          startTime: new Date()
+                        });
+                      }}
+                      className="px-8 py-4 bg-sapphire text-slate-200 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-xl shadow-sapphire/20 hover:scale-105 transition-all active:scale-95"
+                    >
+                      Mulai Sesi Audit
+                    </button>
+                 </div>
+              </div>
+            ) : (
+              <div className="glass-card p-6 border-sapphire/30 bg-sapphire/5 animate-in zoom-in-95">
+                 <div className="flex justify-between items-center mb-6">
+                    <div className="flex items-center gap-4">
+                       <div className="w-12 h-12 bg-sapphire flex items-center justify-center rounded-2xl text-slate-200 shadow-lg shadow-sapphire/30">
+                          <ShieldCheck size={24} />
+                       </div>
+                       <div>
+                          <h3 className="text-sm font-black uppercase tracking-widest text-slate-200">Sesi Audit Berjalan</h3>
+                          <p className="text-[10px] text-sapphire font-bold uppercase tracking-tighter">Branch: {currentAuditBranch?.name}</p>
+                       </div>
+                    </div>
+                    <div className="text-right">
+                       <p className="text-[10px] text-text-dim font-bold uppercase mb-1">Items Scanned</p>
+                       <p className="text-2xl font-black text-slate-200 font-mono">{auditSession.scannedSNs.length}</p>
+                    </div>
+                 </div>
+
+                 <div className="grid grid-cols-2 gap-3 mb-6">
+                    <div className="p-4 bg-black/40 rounded-2xl border border-white/5 text-center">
+                       <p className="text-[8px] text-text-dim uppercase font-black mb-1">Cocok (Matched)</p>
+                       <p className="text-xl font-black text-green-500">{auditResults.filter((r: any) => r.found && !r.extra).length}</p>
+                    </div>
+                    <div className="p-4 bg-black/40 rounded-2xl border border-white/5 text-center">
+                       <p className="text-[8px] text-text-dim uppercase font-black mb-1">Selisih (Missing)</p>
+                       <p className="text-xl font-black text-red-500">{auditResults.filter((r: any) => !r.found).length}</p>
+                    </div>
+                 </div>
+
+                 <div className="flex gap-3">
+                    <button 
+                      onClick={async () => {
+                        // Log the audit
+                        try {
+                          await addDoc(collection(db, 'audit_logs'), {
+                            action: 'physical_audit',
+                            userName: userData?.name || 'Unknown Auditor',
+                            userId: auth.currentUser?.uid,
+                            branchId: auditSession.branchId,
+                            timestamp: serverTimestamp(),
+                            details: {
+                              branchName: branches.find(b => b.id === auditSession.branchId)?.name,
+                              totalScanned: auditSession.scannedSNs.length,
+                              matched: auditResults.filter((r: any) => r.found && !r.extra).length,
+                              missing: auditResults.filter((r: any) => !r.found).length,
+                              extra: auditResults.filter((r: any) => r.extra).length,
+                              startTime: auditSession.startTime
+                            }
+                          });
+                          setAuditSession({ active: false, branchId: null, scannedSNs: [], results: [], startTime: null });
+                          setPosStatus({ message: "Laporan Audit Berhasil Disimpan!", type: 'success' });
+                          setActiveMenu('history');
+                          setHistoryTab('audit');
+                        } catch (e) {
+                          console.error(e);
+                        }
+                      }}
+                      className="flex-1 bg-green-500 text-slate-200 py-4 rounded-xl font-black uppercase text-[10px] tracking-widest shadow-lg shadow-green-500/20 active:scale-95 transition-all"
+                    >
+                      Selesaikan & Simpan Laporan
+                    </button>
+                    <button 
+                      onClick={() => setAuditSession({ active: false, branchId: null, scannedSNs: [], results: [], startTime: null })}
+                      className="px-6 py-4 border border-white/10 rounded-xl text-[10px] font-black uppercase text-text-dim hover:bg-white/5 transition-all"
+                    >
+                      Batal
+                    </button>
+                 </div>
+              </div>
+            )}
+
+            {/* Scanning Area */}
             <div className="glass-card p-12 border-white/10 relative bg-gradient-to-br from-white/[0.03] to-transparent rounded-[2rem]">
               <div className="absolute top-0 right-0 w-64 h-64 bg-sapphire/5 blur-[100px] -mr-32 -mt-32 overflow-hidden pointer-events-none" />
               
               <div className="text-center space-y-8 relative z-10">
-                <div className="w-24 h-24 bg-sapphire/10 rounded-[2rem] flex items-center justify-center mx-auto text-sapphire border border-sapphire/20">
-                  <QrCode size={48} />
-                </div>
-                <div className="max-w-md mx-auto space-y-2">
-                  <h3 className="text-sm font-black uppercase tracking-[0.3em] text-slate-200">Identify Asset</h3>
-                  <p className="text-[10px] text-slate-200/40 font-bold uppercase tracking-widest">Utilize barcode master or unique serial identifier</p>
-                </div>
+                {auditSession.active ? (
+                  <div className="space-y-6">
+                     <div className="w-24 h-24 bg-green-500/10 rounded-[2rem] flex items-center justify-center mx-auto text-green-500 border border-green-500/20 animate-pulse">
+                        <Scan size={48} />
+                     </div>
+                     <div className="max-w-md mx-auto space-y-2">
+                        <h3 className="text-sm font-black uppercase tracking-[0.3em] text-green-500">Scan In Progress</h3>
+                        <p className="text-[10px] text-slate-200/40 font-bold uppercase tracking-widest">Silakan scan semua fisik barang di cabang ini satu per satu</p>
+                     </div>
+                  </div>
+                ) : (
+                  <>
+                  <div className="w-24 h-24 bg-sapphire/10 rounded-[2rem] flex items-center justify-center mx-auto text-sapphire border border-sapphire/20">
+                    <QrCode size={48} />
+                  </div>
+                  <div className="max-w-md mx-auto space-y-2">
+                    <h3 className="text-sm font-black uppercase tracking-[0.3em] text-slate-200">Identify Asset</h3>
+                    <p className="text-[10px] text-slate-200/40 font-bold uppercase tracking-widest">Utilize barcode master or unique serial identifier</p>
+                  </div>
+                  </>
+                )}
                 
                 <div className="relative max-w-lg mx-auto">
                   <input 
@@ -3762,11 +3951,50 @@ export default function App() {
 
               <button 
                 onClick={() => setShowCameraScanner('audit')}
-                className="w-full max-w-lg mx-auto mt-8 py-6 bg-[#151c2c] text-slate-200 hover:text-sapphire rounded-[2rem] font-black uppercase tracking-[0.3em] text-[10px] border border-white/10 hover:border-sapphire/30 shadow-xl active:scale-[0.98] transition-all flex items-center justify-center gap-4"
+                className={`w-full max-w-lg mx-auto mt-8 py-6 rounded-[2rem] font-black uppercase tracking-[0.3em] text-[10px] border shadow-xl active:scale-[0.98] transition-all flex items-center justify-center gap-4 ${
+                  auditSession.active 
+                    ? 'bg-green-500/10 text-green-400 border-green-500/30' 
+                    : 'bg-[#151c2c] text-slate-200 hover:text-sapphire border-white/10 hover:border-sapphire/30'
+                }`}
               >
-                <Camera size={18} /> Initialize Scanner
+                <Camera size={18} /> {auditSession.active ? 'Lanjutkan Scan Opname' : 'Initialize Scanner'}
               </button>
             </div>
+
+            {/* DISCREPANCY REPORT FOR SESSION */}
+            {auditSession.active && auditResults.length > 0 && (
+              <div className="space-y-6">
+                 <div className="flex items-center gap-4 px-2">
+                    <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
+                    <p className="text-[9px] font-black text-slate-200/30 uppercase tracking-[0.4em]">Audit Intelligence Report</p>
+                    <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
+                 </div>
+
+                 <div className="grid gap-3">
+                    {auditResults.filter((r: any) => !r.found || r.extra).slice(0, 20).map((res: any, idx: number) => (
+                      <div key={idx} className={`p-4 rounded-2xl border flex items-center justify-between ${res.extra ? 'bg-yellow-500/5 border-yellow-500/20' : 'bg-red-500/5 border-red-500/20'}`}>
+                         <div className="flex items-center gap-4">
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${res.extra ? 'bg-yellow-500/10 text-yellow-500' : 'bg-red-500/10 text-red-500'}`}>
+                               {res.extra ? <Plus size={18} /> : <AlertTriangle size={18} />}
+                            </div>
+                            <div>
+                               <p className="text-[10px] font-black text-slate-200 uppercase tracking-tight">{res.pName} - {res.vName}</p>
+                               <p className="text-[9px] font-mono text-slate-200/40 tracking-widest">{res.sn}</p>
+                            </div>
+                         </div>
+                         <div className="text-right">
+                            <span className={`text-[8px] font-black uppercase px-3 py-1 rounded-full ${res.extra ? 'bg-yellow-500 text-black' : 'bg-red-500 text-white'}`}>
+                               {res.extra ? 'Kelebihan' : 'Hilang/Belum Scan'}
+                            </span>
+                         </div>
+                      </div>
+                    ))}
+                    {auditResults.filter((r: any) => !r.found || r.extra).length > 20 && (
+                      <p className="text-center text-[8px] text-text-dim uppercase font-bold py-2">... and {auditResults.filter((r: any) => !r.found || r.extra).length - 20} more discrepancies</p>
+                    )}
+                 </div>
+              </div>
+            )}
 
           </div>
         );
@@ -3858,15 +4086,33 @@ export default function App() {
                       <div className="flex justify-between items-start">
                         <p className="text-[10px] font-black text-slate-200 uppercase tracking-tight">
                           {log.action === 'tambah_stok' || log.action === 'tambah_stok_manual' ? 'Restok (1 Pcs)' : 
-                           log.action === 'tambah_stok_masal' ? `Restok (${log.details.qty} Pcs)` : log.action}
+                           log.action === 'tambah_stok_masal' ? `Restok (${log.details.qty} Pcs)` : 
+                           log.action === 'physical_audit' ? 'Stock Opname' : log.action}
                         </p>
                         <span className="text-[8px] text-text-dim whitespace-nowrap">{log.timestamp?.toDate().toLocaleString('id-ID')}</span>
                       </div>
                       <p className="text-[8px] text-sapphire font-bold uppercase tracking-widest mb-1">{log.details.branchName}</p>
-                      <p className="text-[9px] text-text-dim font-bold">
-                        {log.details.productName} - {log.details.variantName} 
-                        {log.details.sn && <span className="text-slate-200 ml-2 font-mono">({log.details.sn})</span>}
-                      </p>
+                      {log.action === 'physical_audit' ? (
+                        <div className="flex gap-4 mt-2">
+                           <div className="text-center">
+                              <p className="text-[7px] text-text-dim uppercase font-black">Scan</p>
+                              <p className="text-xs font-black text-slate-200">{log.details.totalScanned}</p>
+                           </div>
+                           <div className="text-center">
+                              <p className="text-[7px] text-text-dim uppercase font-black">Match</p>
+                              <p className="text-xs font-black text-green-500">{log.details.matched}</p>
+                           </div>
+                           <div className="text-center">
+                              <p className="text-[7px] text-text-dim uppercase font-black">Missing</p>
+                              <p className="text-xs font-black text-red-500">{log.details.missing}</p>
+                           </div>
+                        </div>
+                      ) : (
+                        <p className="text-[9px] text-text-dim font-bold">
+                          {log.details.productName} - {log.details.variantName} 
+                          {log.details.sn && <span className="text-slate-200 ml-2 font-mono">({log.details.sn})</span>}
+                        </p>
+                      )}
                       <div className="mt-2 flex items-center justify-between">
                          <p className="text-[7px] text-sapphire/60 uppercase font-black tracking-tighter">Auditor: {log.userName}</p>
                          {log.action === 'tambah_stok_masal' && (

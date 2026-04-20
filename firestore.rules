@@ -14,17 +14,17 @@ service cloud.firestore {
        return exists(path) ? get(path).data : null;
     }
 
-    function isAdmin() {
-      return isSignedIn() && (
-        request.auth.token.email.lower() == "aditelaid@gmail.com" || 
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
-      );
-    }
-
     function isAudit() {
       let data = getUserData();
       return isSignedIn() && data != null && data.role == 'audit';
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        (request.auth.token != null && request.auth.token.email != null && request.auth.token.email.lower() == "aditelaid@gmail.com") || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+      );
     }
 
     function isEmployee() {
@@ -96,7 +96,7 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         request.auth.uid == userId || 
         isAdmin() || 
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().branchId == resource.data.branchId)
+        (resource != null && resource.data != null && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.branchId == resource.data.branchId)
       );
       allow create: if isSignedIn() && request.auth.uid == userId;
       allow update: if (isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin();
