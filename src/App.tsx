@@ -2945,7 +2945,15 @@ export default function App() {
                     found = true;
                     break;
                   } else {
-                    setPosStatus({ message: `Produk ditemukan, tapi Stok Kosong!`, type: 'error' });
+                    // Show product even if stock is empty as requested
+                    setViewState({
+                      category: p.category,
+                      provider: p.provider,
+                      product: p,
+                      variant: variantFound
+                    });
+                    setActiveMenu('products');
+                    setPosStatus({ message: `Produk ${p.name} Stok Kosong! Menampilkan Detail.`, type: 'info' });
                     found = true; 
                     break;
                   }
@@ -4044,8 +4052,17 @@ export default function App() {
                       setShowCameraScanner(null);
                       break;
                     } else {
-                      setPosStatus({ message: `Produk ditemukan, tapi Stok Kosong!`, type: 'error' });
+                      // Show product even if stock is empty as requested
+                      setViewState({
+                        category: p.category,
+                        provider: p.provider,
+                        product: p,
+                        variant: variantFound
+                      });
+                      setActiveMenu('products');
+                      setPosStatus({ message: `Produk ${p.name} Stok Kosong! Menampilkan Detail.`, type: 'info' });
                       found = true;
+                      setShowCameraScanner(null);
                       break;
                     }
                   }
