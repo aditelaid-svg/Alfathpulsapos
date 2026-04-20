@@ -7,7 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { db, auth } from './firebase';
-import { collection, onSnapshot, addDoc, serverTimestamp, doc, setDoc, updateDoc, getDoc, deleteDoc, query, where, collectionGroup, getDocs, getDocFromServer, runTransaction } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, serverTimestamp, doc, setDoc, updateDoc, getDoc, deleteDoc, query, where, collectionGroup, getDocs, getDocFromServer, runTransaction, orderBy, limit } from 'firebase/firestore';
 import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { Sun, Moon, LayoutDashboard, ShoppingCart, Package, Store, Settings, Plus, ChevronRight, Hash, QrCode, UserCheck, ShieldAlert, MapPin, Trash2, Camera, X, Sparkles, ArrowLeftRight, RotateCcw, FileText, History, LogOut, TrendingUp, Wallet, PieChart, Activity, Coins, FileSpreadsheet, AlertTriangle, Pencil, ShieldCheck, Search, Scan, ChevronDown, BarChart3, LayoutGrid, ArrowRight, Lock } from 'lucide-react';
 import CameraScanner from './components/CameraScanner';
@@ -415,44 +415,42 @@ export default function App() {
       // Isolate branch fetching: Admins see all, Employees see only their one branch
       let unsubBranches = () => {};
       
-      if (userData?.role === 'admin' || userData?.role === 'audit') {
-        const branchesRef = collection(db, 'branches');
-        unsubBranches = onSnapshot(branchesRef, (snapshot) => {
-          const branchData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          setBranches(branchData);
-          if (branchData.length > 0 && !selectedBranch) setSelectedBranch(branchData[0].id);
-        }, (error) => {
-          handleFirestoreError(error, OperationType.LIST, 'branches');
-        });
-      } else if (userData?.branchId) {
-        const branchRef = doc(db, 'branches', userData.branchId);
-        unsubBranches = onSnapshot(branchRef, (snap) => {
-          if (snap.exists()) {
-            const data = { id: snap.id, ...snap.data() };
-            setBranches([data]);
-            setSelectedBranch(snap.id);
+      const fetchBranches = async () => {
+        try {
+          if (userData?.role === 'admin' || userData?.role === 'audit') {
+            const snapshot = await getDocs(collection(db, 'branches'));
+            const branchData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setBranches(branchData);
+            if (branchData.length > 0 && !selectedBranch) setSelectedBranch(branchData[0].id);
+          } else if (userData?.branchId) {
+            const snap = await getDoc(doc(db, 'branches', userData.branchId));
+            if (snap.exists()) {
+              const data = { id: snap.id, ...snap.data() };
+              setBranches([data]);
+              setSelectedBranch(snap.id);
+            }
           }
-        }, (error) => {
-          handleFirestoreError(error, OperationType.GET, `branches/${userData.branchId}`);
-        });
-      }
+        } catch (error) {
+          handleFirestoreError(error, OperationType.LIST, 'branches');
+        }
+      };
+      if (userData) fetchBranches();
       
       let unsubUsers = () => {};
-      if (userData?.role === 'admin') {
-        unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
-          setAllUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        }, (error) => {
+      const fetchUsers = async () => {
+        try {
+          if (userData?.role === 'admin') {
+            const snapshot = await getDocs(collection(db, 'users'));
+            setAllUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+          } else if (userData?.branchId) {
+            const snapshot = await getDocs(query(collection(db, 'users'), where('branchId', '==', userData.branchId)));
+            setAllUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+          }
+        } catch (error) {
           handleFirestoreError(error, OperationType.LIST, 'users');
-        });
-      } else if (userData?.branchId) {
-        // Karyawan hanya melihat user di cabang mereka untuk serah terima
-        const usersRef = query(collection(db, 'users'), where('branchId', '==', userData.branchId));
-        unsubUsers = onSnapshot(usersRef, (snapshot) => {
-          setAllUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        }, (error) => {
-          handleFirestoreError(error, OperationType.LIST, 'users_branch');
-        });
-      }
+        }
+      };
+      if (userData) fetchUsers();
 
       let unsubActiveShifts = () => {};
       if (selectedBranch) {
@@ -480,34 +478,34 @@ export default function App() {
       let unsubAuditLogs = () => {};
 
       if (userData?.role === 'admin' || userData?.role === 'audit') {
-        unsubTransactions = onSnapshot(collection(db, 'transactions'), (snapshot) => {
+        unsubTransactions = onSnapshot(query(collection(db, 'transactions'), orderBy('timestamp', 'desc'), limit(50)), (snapshot) => {
           setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         }, (error) => {
           handleFirestoreError(error, OperationType.LIST, 'transactions');
         });
-        unsubTransfers = onSnapshot(collection(db, 'transfers'), (snapshot) => {
+        unsubTransfers = onSnapshot(query(collection(db, 'transfers'), orderBy('timestamp', 'desc'), limit(50)), (snapshot) => {
           setTransfers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         }, (error) => {
           handleFirestoreError(error, OperationType.LIST, 'transfers');
         });
-        unsubDisposals = onSnapshot(collection(db, 'disposals'), (snapshot) => {
+        unsubDisposals = onSnapshot(query(collection(db, 'disposals'), orderBy('timestamp', 'desc'), limit(50)), (snapshot) => {
           setDisposals(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         }, (error) => {
           handleFirestoreError(error, OperationType.LIST, 'disposals');
         });
-        unsubHandovers = onSnapshot(collection(db, 'handovers'), (snapshot) => {
+        unsubHandovers = onSnapshot(query(collection(db, 'handovers'), orderBy('timestamp', 'desc'), limit(50)), (snapshot) => {
           setHandovers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         }, (error) => {
           handleFirestoreError(error, OperationType.LIST, 'handovers');
         });
-        unsubAuditLogs = onSnapshot(collection(db, 'audit_logs'), (snapshot) => {
+        unsubAuditLogs = onSnapshot(query(collection(db, 'audit_logs'), orderBy('timestamp', 'desc'), limit(50)), (snapshot) => {
           setAuditLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         }, (error) => {
           handleFirestoreError(error, OperationType.LIST, 'audit_logs');
         });
       } else if (userData?.branchId) {
         // Karyawan hanya mendengarkan transaksi cabang mereka
-        unsubTransactions = onSnapshot(query(collection(db, 'transactions'), where('branchId', '==', userData.branchId)), (snapshot) => {
+        unsubTransactions = onSnapshot(query(collection(db, 'transactions'), where('branchId', '==', userData.branchId), orderBy('timestamp', 'desc'), limit(50)), (snapshot) => {
           setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         }, (error) => {
           handleFirestoreError(error, OperationType.LIST, 'transactions_branch');
