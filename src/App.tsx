@@ -173,6 +173,8 @@ export default function App() {
   const [showHandoverModal, setShowHandoverModal] = useState(false);
   const [handoverConfig, setHandoverConfig] = useState({ cash: 0, notes: '', shift: 'siang' });
   const [isShiftActive, setIsShiftActive] = useState(false);
+  const [currentShift, setCurrentShift] = useState<any>(null);
+  const [shiftSelection, setShiftSelection] = useState({ userId: '', mode: 'siang' });
 
   const providersList = ['Telkomsel', 'Indosat', 'XL', 'Axis', 'Three', 'Smartfren', 'Lainnya'];
   const brandsList = ['Robot', 'Vivan', 'Baseus', 'Oppo', 'Samsung', 'Vivo', 'Xiaomi', 'Rexi', 'Foomee', 'Lainnya'];
@@ -425,6 +427,29 @@ export default function App() {
         }, (error) => {
           handleFirestoreError(error, OperationType.LIST, 'users');
         });
+      } else if (userData?.branchId) {
+        // Employees see users in their branch for handover selection
+        const usersRef = query(collection(db, 'users'), where('branchId', '==', userData.branchId));
+        unsubUsers = onSnapshot(usersRef, (snapshot) => {
+          setAllUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        });
+      }
+
+      let unsubActiveShifts = () => {};
+      if (selectedBranch) {
+        const activeShiftsRef = query(collection(db, 'active_shifts'), where('branchId', '==', selectedBranch));
+        unsubActiveShifts = onSnapshot(activeShiftsRef, (snapshot) => {
+          const shifts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          // Check if there's an active shift for the current user
+          const myShift = shifts.find((s: any) => s.userId === user?.uid);
+          if (myShift) {
+            setCurrentShift(myShift);
+            setIsShiftActive(true);
+          } else {
+            setCurrentShift(null);
+            setIsShiftActive(false);
+          }
+        });
       }
 
       let unsubTransactions = () => {};
@@ -475,6 +500,7 @@ export default function App() {
         unsubDisposals(); 
         unsubHandovers();
         unsubAuditLogs();
+        unsubActiveShifts();
       };
     }
   }, [userData, selectedBranch]);
@@ -3098,22 +3124,89 @@ export default function App() {
                     </div>
                  </div>
                  <h3 className="text-2xl font-black text-slate-200 uppercase tracking-tighter mb-4">Terminal Encrypted</h3>
-                 <p className="text-[10px] text-text-dim font-bold uppercase tracking-[0.4em] mb-12 leading-loose max-w-xs mx-auto">
-                    Aktivasi sesi shift diperlukan <br />
-                    untuk otorisasi transaksi
-                 </p>
-                 <button 
-                   onClick={() => setIsShiftActive(true)}
-                   className="w-full max-w-sm py-5 bg-sapphire text-slate-200 rounded-[2rem] font-black uppercase tracking-[0.4em] text-[10px] shadow-[0_20px_50px_rgba(37,99,235,0.3)] hover:shadow-[0_20px_50px_rgba(37,99,235,0.5)] hover:-translate-y-1 active:scale-[0.98] transition-all flex items-center justify-center gap-4 mx-auto"
-                 >
-                   <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ repeat: Infinity, duration: 4, ease: "linear" }}
+                 {currentShift ? (
+                    <div className="mb-12 p-6 bg-sapphire/5 border border-sapphire/20 rounded-3xl space-y-4">
+                      <p className="text-[10px] text-sapphire font-black uppercase tracking-[0.4em]">Active Duty</p>
+                      <div className="flex items-center justify-center gap-4">
+                        <div className="w-12 h-12 bg-sapphire rounded-2xl flex items-center justify-center text-white font-black text-xl">
+                          {currentShift.employeeName?.charAt(0)}
+                        </div>
+                        <div className="text-left">
+                          <p className="text-sm font-black text-slate-200 uppercase tracking-widest">{currentShift.employeeName}</p>
+                          <p className="text-[9px] text-text-dim uppercase font-bold tracking-widest">Shift {currentShift.mode}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-text-dim font-bold uppercase tracking-[0.4em] mb-12 leading-loose max-w-xs mx-auto">
+                       Aktivasi sesi shift diperlukan <br />
+                       untuk otorisasi transaksi
+                    </p>
+                  )}
+                 <div className="max-w-sm mx-auto space-y-8">
+                   <div className="space-y-4">
+                     <p className="text-[10px] text-sapphire font-black uppercase tracking-widest text-left px-4">PILIH KARIAWAN JAGA</p>
+                     <div className="grid grid-cols-1 gap-2">
+                       {allUsers.filter(u => u.branchId === selectedBranch).map(u => (
+                         <button
+                           key={u.id}
+                           onClick={() => setShiftSelection({ ...shiftSelection, userId: u.id })}
+                           className={`p-4 rounded-2xl border text-left flex items-center justify-between transition-all ${shiftSelection.userId === u.id ? 'bg-sapphire/20 border-sapphire/50 text-slate-200' : 'bg-black/40 border-white/5 text-text-dim hover:border-white/20'}`}
+                         >
+                           <div className="flex items-center gap-3">
+                             <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black ${shiftSelection.userId === u.id ? 'bg-sapphire text-white' : 'bg-white/10 text-text-dim'}`}>
+                               {u.name.charAt(0)}
+                             </div>
+                             <span className="text-xs font-bold uppercase tracking-widest">{u.name}</span>
+                           </div>
+                           {shiftSelection.userId === u.id && <ShieldCheck size={16} className="text-sapphire" />}
+                         </button>
+                       ))}
+                     </div>
+                   </div>
+
+                   <div className="space-y-4">
+                     <p className="text-[10px] text-sapphire font-black uppercase tracking-widest text-left px-4">MODE JAGA</p>
+                     <div className="grid grid-cols-2 gap-4">
+                       <button
+                         onClick={() => setShiftSelection({ ...shiftSelection, mode: 'siang' })}
+                         className={`p-4 rounded-2xl border flex flex-col items-center gap-2 transition-all ${shiftSelection.mode === 'siang' ? 'bg-yellow-500/20 border-yellow-500/50 text-yellow-500' : 'bg-black/40 border-white/5 text-text-dim hover:border-white/20'}`}
+                       >
+                         <Sun size={20} />
+                         <span className="text-[9px] font-black uppercase tracking-widest">SIANG</span>
+                       </button>
+                       <button
+                         onClick={() => setShiftSelection({ ...shiftSelection, mode: 'malam' })}
+                         className={`p-4 rounded-2xl border flex flex-col items-center gap-2 transition-all ${shiftSelection.mode === 'malam' ? 'bg-purple-500/20 border-purple-500/30 text-purple-500' : 'bg-black/40 border-white/5 text-text-dim hover:border-white/20'}`}
+                       >
+                         <Moon size={20} />
+                         <span className="text-[9px] font-black uppercase tracking-widest">MALAM</span>
+                       </button>
+                     </div>
+                   </div>
+
+                   <button 
+                     disabled={!shiftSelection.userId}
+                     onClick={async () => {
+                       if (!shiftSelection.userId) return;
+                       try {
+                         await addDoc(collection(db, 'active_shifts'), {
+                           branchId: selectedBranch,
+                           userId: user?.uid,
+                           employeeId: shiftSelection.userId,
+                           employeeName: allUsers.find(u => u.id === shiftSelection.userId)?.name,
+                           mode: shiftSelection.mode,
+                           startTime: serverTimestamp()
+                         });
+                       } catch (error) {
+                         handleFirestoreError(error, OperationType.WRITE, 'active_shifts');
+                       }
+                     }}
+                     className="w-full py-5 bg-sapphire text-slate-200 rounded-[2rem] font-black uppercase tracking-[0.4em] text-[10px] shadow-[0_20px_50px_rgba(37,99,235,0.3)] hover:shadow-[0_20px_50px_rgba(37,99,235,0.5)] hover:-translate-y-1 active:scale-[0.98] transition-all flex items-center justify-center gap-4 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed mx-auto"
                    >
-                    <Sparkles size={18} />
-                   </motion.div>
-                   Initialize Session
-                 </button>
+                     {shiftSelection.userId ? 'Initialize Session' : 'Pilih Nama Kariawan'}
+                   </button>
+                 </div>
               </motion.div>
             ) : (
               <div className="space-y-8">
@@ -4344,7 +4437,7 @@ export default function App() {
                <button 
                  onClick={async () => {
                     try {
-                       const sessionTx = transactions.filter(t => t.employeeId === user?.uid && t.status !== 'returned' && t.timestamp?.toDate() > new Date(Date.now() - 12 * 60 * 60 * 1000));
+                       const sessionTx = transactions.filter(t => t.employeeId === user?.uid && t.status !== 'returned' && (t.timestamp?.toDate() > (currentShift?.startTime?.toDate() || new Date(Date.now() - 12 * 60 * 60 * 1000))));
                        const totalVoucher = sessionTx.reduce((acc, tx) => acc + tx.items.filter((i:any) => i.category !== 'aksesoris').reduce((s:number, item:any)=>s+item.price, 0),0);
                        const totalAksesoris = sessionTx.reduce((acc, tx) => acc + tx.items.filter((i:any) => i.category === 'aksesoris').reduce((s:number, item:any)=>s+item.price, 0),0);
                        
@@ -4361,7 +4454,12 @@ export default function App() {
                           notes: handoverConfig.notes,
                           timestamp: serverTimestamp()
                        });
+                       if (currentShift?.id) {
+                          await deleteDoc(doc(db, 'active_shifts', currentShift.id));
+                       }
                        setIsShiftActive(false);
+                       setCurrentShift(null);
+                       setShiftSelection({ userId: '', mode: 'siang' });
                        setShowHandoverModal(false);
                        setHandoverConfig({ cash: 0, notes: '', shift: 'siang' });
                        setPosStatus({ message: 'Serah terima shift berhasil disimpan!', type: 'success' });

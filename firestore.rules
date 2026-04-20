@@ -95,5 +95,11 @@ service cloud.firestore {
       allow read: if isAdmin() || isAudit();
       allow create: if isAdmin() || isAudit() || isEmployee();
     }
+
+    match /active_shifts/{shiftId} {
+      allow read: if isSignedIn();
+      allow create: if isEmployee() && request.resource.data.userId == request.auth.uid;
+      allow delete: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
+    }
   }
 }
