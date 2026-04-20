@@ -48,7 +48,17 @@
       "properties": {
         "productId": { "type": "string" },
         "variantId": { "type": "string" },
-        "sns": { "type": "array", "description": "List of serial numbers" },
+        "sns": { 
+          "type": "array", 
+          "description": "List of serial number objects",
+          "items": {
+            "type": "object",
+            "properties": {
+              "sn": { "type": "string" },
+              "expiredDate": { "type": "string", "format": "date" }
+            }
+          }
+        },
         "stock": { "type": "number" }
       }
     },

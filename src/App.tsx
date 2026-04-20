@@ -2766,36 +2766,53 @@ export default function App() {
                                     <button 
                                       onClick={async () => {
                                         if (!selectedBranch) return;
+                                        
+                                        // 1. Generate SNs
                                         const sns = [];
                                         const padding = startMatch[2].length;
                                         for (let i = s; i <= e; i++) {
                                           sns.push(startMatch[1] + i.toString().padStart(padding, '0'));
                                         }
 
-                                        const itemRef = doc(db, `branches/${selectedBranch}/inventory`, `${viewState.product.id}_${viewState.variant.id}`);
-                                        const currentData = branchInventory[`${viewState.product.id}_${viewState.variant.id}`] || { sns: [] };
-                                        
-                                        // Skip duplicates
-                                        const uniqueNewSns = sns.filter(sn => !currentData.sns.includes(sn));
-                                        if (uniqueNewSns.length === 0) {
-                                          setPosStatus({ message: "Semua SN dalam jangkauan sudah terdaftar!", type: 'error' });
-                                          return;
+                                        // 2. Transaksi untuk Keamanan Total
+                                        try {
+                                          await runTransaction(db, async (transaction) => {
+                                            const itemRef = doc(db, `branches/${selectedBranch}/inventory`, `${viewState.product.id}_${viewState.variant.id}`);
+                                            const itemDoc = await transaction.get(itemRef);
+                                            const currentData = itemDoc.exists() ? itemDoc.data() : { sns: [] };
+                                            
+                                            // Filter SN yang sudah terdaftar di cabang ini
+                                            const uniqueNewSns = sns.filter(sn => !currentData.sns.includes(sn));
+                                            if (uniqueNewSns.length === 0) throw new Error("Semua SN dalam jangkauan sudah terdaftar!");
+
+                                            // Global Duplicate Check
+                                            if (viewState.product.category !== 'aksesoris') {
+                                              for (const sn of uniqueNewSns) {
+                                                const globalSnQuery = query(collectionGroup(db, 'inventory'), where('sns', 'array-contains', sn));
+                                                const globalSnap = await getDocs(globalSnQuery);
+                                                if (!globalSnap.empty) throw new Error(`SN ${sn} sudah terdaftar di cabang lain!`);
+                                              }
+                                            }
+
+                                            const finalSns = [...(currentData.sns || []), ...uniqueNewSns];
+                                            transaction.set(itemRef, {
+                                              productId: viewState.product.id,
+                                              variantId: viewState.variant.id,
+                                              sns: finalSns,
+                                              stock: finalSns.length,
+                                              lastUpdated: serverTimestamp()
+                                            });
+                                          });
+
+                                          setRangeSNConfig({ start: '', end: '' });
+                                          setShowRangeSN(false);
+                                          const dispName = viewState.product.category === 'aksesoris' ? `${viewState.product.provider} ${viewState.variant.name} ${viewState.product.name}` : `${viewState.product.name} - ${viewState.variant.name}`;
+                                          setPosStatus({ message: `✅ Berhasil Input Massal: ${dispName}`, type: 'success' });
+                                          setTimeout(() => setPosStatus({ message: '', type: 'info' }), 4000);
+                                        } catch (err: any) {
+                                          setPosStatus({ message: err.message, type: 'error' });
+                                          setTimeout(() => setPosStatus({ message: '', type: 'info' }), 4000);
                                         }
-
-                                        const finalSns = [...currentData.sns, ...uniqueNewSns];
-                                        await setDoc(itemRef, {
-                                          productId: viewState.product.id,
-                                          variantId: viewState.variant.id,
-                                          sns: finalSns,
-                                          stock: finalSns.length,
-                                          lastUpdated: serverTimestamp()
-                                        });
-
-                                        setRangeSNConfig({ start: '', end: '' });
-                                        setShowRangeSN(false);
-                                        const dispName = viewState.product.category === 'aksesoris' ? `${viewState.product.provider} ${viewState.variant.name} ${viewState.product.name}` : `${viewState.product.name} - ${viewState.variant.name}`;
-                                        setPosStatus({ message: `✅ Berhasil Input ${uniqueNewSns.length} SN Berurutan: ${dispName}`, type: 'success' });
-                                        setTimeout(() => setPosStatus({ message: '', type: 'info' }), 4000);
                                       }}
                                       className="w-full py-3 bg-accent-blue text-slate-200 rounded-xl font-bold text-[10px] uppercase tracking-widest shadow-lg shadow-accent-blue/20 hover:bg-white/10 active:scale-95 transition"
                                     >
