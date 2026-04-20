@@ -3088,16 +3088,16 @@ export default function App() {
         return (
           <div className="space-y-8 pb-[280px] animate-in fade-in duration-1000">
             <div className="flex justify-between items-end px-1">
-               <div>
-                  <p className="text-[10px] font-black text-sapphire uppercase tracking-[0.4em] mb-1">Point of Sale</p>
+                <div>
+                  <p className="text-[10px] font-black text-sapphire uppercase tracking-[0.4em] mb-1">Kasir</p>
                   <h2 className="text-2xl font-black text-slate-200 tracking-widest uppercase flex items-center gap-3">
-                    Transaction <span className="text-sapphire">Terminal</span>
+                    Terminal <span className="text-sapphire">Transaksi</span>
                   </h2>
-               </div>
-               <div className="flex items-center gap-3">
+                </div>
+                <div className="flex items-center gap-3">
                   <div className="text-[10px] bg-[#151c2c] text-slate-200/60 px-4 py-2 rounded-full font-bold border border-white/10 uppercase tracking-widest backdrop-blur-md">
                      <span className="text-sapphire mr-2">●</span>
-                     {branches.find(b => b.id === selectedBranch)?.name || 'Central Node'}
+                     {branches.find(b => b.id === selectedBranch)?.name || 'Pusat Data'}
                   </div>
                   {isShiftActive && (
                     <button 
@@ -3123,10 +3123,10 @@ export default function App() {
                        <Lock size={40} className="text-sapphire" />
                     </div>
                  </div>
-                 <h3 className="text-2xl font-black text-slate-200 uppercase tracking-tighter mb-4">Terminal Encrypted</h3>
+                 <h3 className="text-2xl font-black text-slate-200 uppercase tracking-tighter mb-4">Terminal Terkunci</h3>
                  {currentShift ? (
                     <div className="mb-12 p-6 bg-sapphire/5 border border-sapphire/20 rounded-3xl space-y-4">
-                      <p className="text-[10px] text-sapphire font-black uppercase tracking-[0.4em]">Active Duty</p>
+                      <p className="text-[10px] text-sapphire font-black uppercase tracking-[0.4em]">Sedang Bertugas</p>
                       <div className="flex items-center justify-center gap-4">
                         <div className="w-12 h-12 bg-sapphire rounded-2xl flex items-center justify-center text-white font-black text-xl">
                           {currentShift.employeeName?.charAt(0)}
@@ -3145,7 +3145,7 @@ export default function App() {
                   )}
                  <div className="max-w-sm mx-auto space-y-8">
                    <div className="space-y-4">
-                     <p className="text-[10px] text-sapphire font-black uppercase tracking-widest text-left px-4">PILIH KARIAWAN JAGA</p>
+                     <p className="text-[10px] text-sapphire font-black uppercase tracking-widest text-left px-4">PILIH KARYAWAN JAGA</p>
                      <div className="grid grid-cols-1 gap-2">
                        {allUsers.filter(u => u.branchId === selectedBranch).map(u => (
                          <button
@@ -3190,21 +3190,32 @@ export default function App() {
                      onClick={async () => {
                        if (!shiftSelection.userId) return;
                        try {
-                         await addDoc(collection(db, 'active_shifts'), {
+                         const shiftData = {
                            branchId: selectedBranch,
                            userId: user?.uid,
                            employeeId: shiftSelection.userId,
                            employeeName: allUsers.find(u => u.id === shiftSelection.userId)?.name,
                            mode: shiftSelection.mode,
                            startTime: serverTimestamp()
+                         };
+                         
+                         // Optimis (Instan UI)
+                         setIsShiftActive(true);
+                         setCurrentShift({
+                           ...shiftData,
+                           startTime: { toDate: () => new Date() }
                          });
+
+                         await addDoc(collection(db, 'active_shifts'), shiftData);
                        } catch (error) {
+                         setIsShiftActive(false);
+                         setCurrentShift(null);
                          handleFirestoreError(error, OperationType.WRITE, 'active_shifts');
                        }
                      }}
                      className="w-full py-5 bg-sapphire text-slate-200 rounded-[2rem] font-black uppercase tracking-[0.4em] text-[10px] shadow-[0_20px_50px_rgba(37,99,235,0.3)] hover:shadow-[0_20px_50px_rgba(37,99,235,0.5)] hover:-translate-y-1 active:scale-[0.98] transition-all flex items-center justify-center gap-4 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed mx-auto"
                    >
-                     {shiftSelection.userId ? 'Initialize Session' : 'Pilih Nama Kariawan'}
+                     {shiftSelection.userId ? 'Buka Sesi Shift' : 'Pilih Nama Karyawan'}
                    </button>
                  </div>
               </motion.div>
@@ -3215,7 +3226,7 @@ export default function App() {
                   
                   <div className="space-y-4 relative z-10">
                     <div className="flex justify-between items-center px-1">
-                      <p className="text-[10px] font-black text-sapphire uppercase tracking-[0.4em]">Search & Scan Oracle</p>
+                      <p className="text-[10px] font-black text-sapphire uppercase tracking-[0.4em]">Pencarian & Scan Barcode</p>
                       <div className="flex items-center gap-2">
                         <div className={`w-2 h-2 rounded-full ${isShiftActive ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'bg-red-500'} animate-pulse`} />
                         <span className="text-[8px] font-black text-slate-200/40 uppercase tracking-widest">{isShiftActive ? 'Ready' : 'Standby'}</span>
