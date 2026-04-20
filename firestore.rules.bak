@@ -1,0 +1,123 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Global Hardened Helpers
+    // ===============================================================
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(uid) { return isSignedIn() && request.auth.uid == uid; }
+    
+    function getUserData() {
+       let path = /databases/$(database)/documents/users/$(request.auth.uid);
+       return exists(path) ? get(path).data : null;
+    }
+
+    function isAudit() {
+      let data = getUserData();
+      return isSignedIn() && data != null && data.role == 'audit';
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        (request.auth.token != null && request.auth.token.email != null && request.auth.token.email.lower() == "aditelaid@gmail.com") || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+      );
+    }
+
+    function isEmployee() {
+      let data = getUserData();
+      return isSignedIn() && data != null && data.role == 'employee' && data.isApproved == true;
+    }
+
+    function isBranchMember(branchId) {
+      let data = getUserData();
+      return isAdmin() || isAudit() || (isEmployee() && data != null && data.branchId == branchId);
+    }
+    
+    // Schema Validator Helpers
+    function isValidProduct(data) {
+      return data.name is string && data.category is string && data.provider is string;
+    }
+
+    // ===============================================================
+    // Fortress Rules
+    // ===============================================================
+    
+    // Default Deny
+    match /{document=**} { allow read, write: if false; }
+
+    match /products/{productId} {
+      allow read: if isSignedIn();
+      allow create, update: if isAdmin() && isValidProduct(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /branches/{branchId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /branches/{branchId}/inventory/{itemId} {
+      allow read: if isAdmin() || isAudit() || (isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.branchId == branchId);
+      
+      // Allow update for branch members (for POS/stock consumption)
+      // Must not result in negative stock
+      allow update: if isAdmin() || isAudit() || (
+        isSignedIn() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.branchId == branchId &&
+        request.resource.data.stock >= 0 &&
+        (request.resource.data.stock == resource.data.stock - 1 || request.resource.data.stock < resource.data.stock)
+      );
+      
+      allow create, delete: if isAdmin() || isAudit();
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isAdmin() || isAudit() || (isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && resource.data.branchId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.branchId);
+      allow create: if isSignedIn() && request.resource.data.branchId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.branchId;
+    }
+
+    match /transfers/{transferId} {
+      allow read: if isAdmin() || isAudit();
+      allow create: if isEmployee() || isAdmin();
+    }
+
+    match /disposals/{disposalId} {
+      allow read: if isAdmin() || isAudit();
+      allow create: if isEmployee();
+    }
+    
+    match /users/{userId} {
+      // Allow read if owner, admin, or in the same branch
+      allow read: if isSignedIn() && (
+        request.auth.uid == userId || 
+        isAdmin() || 
+        (resource != null && resource.data != null && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.branchId == resource.data.branchId)
+      );
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update: if (isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin();
+    }
+
+    match /handovers/{handoverId} {
+      allow read: if isAdmin() || isAudit() || (isSignedIn() && resource.data.branchId == getUserData().branchId);
+      allow create: if isEmployee();
+      allow delete: if isAdmin();
+    }
+
+    match /audit_logs/{logId} {
+      allow read: if isAdmin() || isAudit();
+      allow create: if isAdmin() || isAudit() || isEmployee();
+    }
+
+    match /active_shifts/{shiftId} {
+      // Allow read for anyone in the branch, or admin/audit
+      allow read: if isAdmin() || isAudit() || (isSignedIn() && resource.data.branchId == getUserData().branchId);
+      allow create: if isEmployee() && request.resource.data.userId == request.auth.uid;
+      allow delete: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
+    }
+  }
+}

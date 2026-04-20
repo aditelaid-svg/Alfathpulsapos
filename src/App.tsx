@@ -3056,6 +3056,8 @@ export default function App() {
                   updates[key].push(item);
                 });
 
+                const txRef = doc(collection(db, 'transactions'));
+                
                 await runTransaction(db, async (transaction) => {
                   for (const key in updates) {
                     const itemsToSell = updates[key];
@@ -3077,7 +3079,6 @@ export default function App() {
                       const snsToRemove = itemsToSell.map(i => i.sn);
                       const existingSns = [...(currentData.sns || [])];
                       
-                      // Perketat SN: Pastikan semua SN yang akan dijual benar-benar ada di stok
                       const missingSns = snsToRemove.filter(sn => !existingSns.includes(sn));
                       if (missingSns.length > 0) {
                         throw new Error(`SN ${missingSns.join(', ')} sudah tidak tersedia di stok!`);
@@ -3092,35 +3093,34 @@ export default function App() {
                       });
                     }
                   }
+
+                  // Add transaction document inside the transaction
+                  const txData = {
+                    branchId: selectedBranch,
+                    branchName: branches.find(b => b.id === selectedBranch)?.name || 'Unknown',
+                    employeeId: auth.currentUser?.uid,
+                    employeeName: userData?.name || 'Staff',
+                    items: cart.map(item => ({
+                      productId: item.productId,
+                      variantId: item.variantId,
+                      sn: item.sn,
+                      name: item.name,
+                      variantName: item.variantName,
+                      price: item.price,
+                      modal: item.modal || 0,
+                      category: item.category,
+                      provider: item.provider
+                    })),
+                    totalAmount: totalCart,
+                    totalProfit: cart.reduce((acc, curr) => acc + (curr.price - (curr.modal || 0)), 0),
+                    status: 'success',
+                    timestamp: serverTimestamp()
+                  };
+                  transaction.set(txRef, txData);
                 });
 
-                // Add to Global Transactions
-                const txData: any = {
-                  branchId: selectedBranch,
-                  branchName: branches.find(b => b.id === selectedBranch)?.name || 'Unknown',
-                  employeeId: auth.currentUser?.uid,
-                  employeeName: userData?.name || 'Staff',
-                  items: cart.map(item => ({
-                    productId: item.productId,
-                    variantId: item.variantId,
-                    sn: item.sn,
-                    name: item.name,
-                    variantName: item.variantName,
-                    price: item.price,
-                    modal: item.modal || 0,
-                    category: item.category,
-                    provider: item.provider
-                  })),
-                  totalAmount: totalCart,
-                  totalProfit: cart.reduce((acc, curr) => acc + (curr.price - (curr.modal || 0)), 0),
-                  status: 'success',
-                  timestamp: serverTimestamp()
-                };
-
-                const docRef = await addDoc(collection(db, 'transactions'), txData);
-                
-                // Create receipt snapshot
-                setLastTransaction({ id: docRef.id, ...txData, timestamp: new Date() });
+                // Create receipt snapshot (using the doc id from txRef)
+                setLastTransaction({ id: txRef.id, ...txData, timestamp: new Date() });
                 
                 setCart([]);
                 setPosStatus({ message: "Penjualan Berhasil Disimpan!", type: 'success' });
