@@ -10,25 +10,31 @@ service cloud.firestore {
     function isOwner(uid) { return isSignedIn() && request.auth.uid == uid; }
     
     function getUserData() {
-       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+       let path = /databases/$(database)/documents/users/$(request.auth.uid);
+       return exists(path) ? get(path).data : null;
     }
 
     function isAdmin() {
-      return isSignedIn() && 
-             (request.auth.token.email == "aditelaid@gmail.com" || 
-             (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'admin'));
+      return isSignedIn() && (
+        request.auth.token.email.lower() == "aditelaid@gmail.com" || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+      );
     }
 
     function isAudit() {
-      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'audit';
+      let data = getUserData();
+      return isSignedIn() && data != null && data.role == 'audit';
     }
 
     function isEmployee() {
-      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'employee' && getUserData().isApproved == true;
+      let data = getUserData();
+      return isSignedIn() && data != null && data.role == 'employee' && data.isApproved == true;
     }
 
     function isBranchMember(branchId) {
-      return isAdmin() || isAudit() || (isEmployee() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().branchId == branchId);
+      let data = getUserData();
+      return isAdmin() || isAudit() || (isEmployee() && data != null && data.branchId == branchId);
     }
     
     // Schema Validator Helpers
@@ -44,27 +50,35 @@ service cloud.firestore {
     match /{document=**} { allow read, write: if false; }
 
     match /products/{productId} {
-      allow read: if isSignedIn() && (isAdmin() || isAudit() || isEmployee());
+      allow read: if isSignedIn();
       allow create, update: if isAdmin() && isValidProduct(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /branches/{branchId} {
-      allow read: if isSignedIn() && (isAdmin() || isAudit() || isEmployee());
+      allow read: if isSignedIn();
       allow write: if isAdmin();
     }
 
     match /branches/{branchId}/inventory/{itemId} {
-      allow read: if isBranchMember(branchId);
+      allow read: if isAdmin() || isAudit() || (isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.branchId == branchId);
       
-      // Kasir tidak boleh menulis langsung ke dokumen inventaris. 
-      // Mereka hanya boleh lewat transaksi POS (via transaksi/transfers/disposals)
-      allow write: if isAdmin() || isAudit();
+      // Allow update for branch members (for POS/stock consumption)
+      // Must not result in negative stock
+      allow update: if isAdmin() || isAudit() || (
+        isSignedIn() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.branchId == branchId &&
+        request.resource.data.stock >= 0 &&
+        (request.resource.data.stock == resource.data.stock - 1 || request.resource.data.stock < resource.data.stock)
+      );
+      
+      allow create, delete: if isAdmin() || isAudit();
     }
 
     match /transactions/{transactionId} {
-      allow read: if isAdmin() || isAudit() || (isEmployee() && resource.data.branchId == getUserData().branchId);
-      allow create: if isEmployee() && request.resource.data.branchId == getUserData().branchId;
+      allow read: if isAdmin() || isAudit() || (isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && resource.data.branchId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.branchId);
+      allow create: if isSignedIn() && request.resource.data.branchId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.branchId;
     }
 
     match /transfers/{transferId} {
@@ -78,15 +92,18 @@ service cloud.firestore {
     }
     
     match /users/{userId} {
-      // Allow read if owner OR admin. 
-      // Changed from isOwner() helper to explicit check to avoid potential get() calls on self in some contexts.
-      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      // Allow read if owner, admin, or in the same branch
+      allow read: if isSignedIn() && (
+        request.auth.uid == userId || 
+        isAdmin() || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().branchId == resource.data.branchId)
+      );
       allow create: if isSignedIn() && request.auth.uid == userId;
       allow update: if (isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin();
     }
 
     match /handovers/{handoverId} {
-      allow read: if isAdmin() || isAudit() || (isEmployee() && resource.data.branchId == getUserData().branchId);
+      allow read: if isAdmin() || isAudit() || (isSignedIn() && resource.data.branchId == getUserData().branchId);
       allow create: if isEmployee();
       allow delete: if isAdmin();
     }
@@ -97,7 +114,8 @@ service cloud.firestore {
     }
 
     match /active_shifts/{shiftId} {
-      allow read: if isSignedIn();
+      // Allow read for anyone in the branch, or admin/audit
+      allow read: if isAdmin() || isAudit() || (isSignedIn() && resource.data.branchId == getUserData().branchId);
       allow create: if isEmployee() && request.resource.data.userId == request.auth.uid;
       allow delete: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
     }

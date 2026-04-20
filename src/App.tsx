@@ -176,6 +176,13 @@ export default function App() {
   const [currentShift, setCurrentShift] = useState<any>(null);
   const [shiftSelection, setShiftSelection] = useState({ userId: '', mode: 'siang' });
 
+  // Auto-select employee based on logged in user
+  useEffect(() => {
+    if (user && userData && !shiftSelection.userId) {
+      setShiftSelection(prev => ({ ...prev, userId: user.uid }));
+    }
+  }, [user, userData]);
+
   const providersList = ['Telkomsel', 'Indosat', 'XL', 'Axis', 'Three', 'Smartfren', 'Lainnya'];
   const brandsList = ['Robot', 'Vivan', 'Baseus', 'Oppo', 'Samsung', 'Vivo', 'Xiaomi', 'Rexi', 'Foomee', 'Lainnya'];
   const accessoryTypes = ['Charger', 'Headset', 'Kabel Data', 'Powerbank', 'Tempered Glass', 'Memory Card', 'Speaker', 'Earphone', 'Casing', 'Adaptor', 'Lainnya'];
@@ -428,10 +435,12 @@ export default function App() {
           handleFirestoreError(error, OperationType.LIST, 'users');
         });
       } else if (userData?.branchId) {
-        // Employees see users in their branch for handover selection
+        // Karyawan hanya melihat user di cabang mereka untuk serah terima
         const usersRef = query(collection(db, 'users'), where('branchId', '==', userData.branchId));
         unsubUsers = onSnapshot(usersRef, (snapshot) => {
           setAllUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        }, (error) => {
+          handleFirestoreError(error, OperationType.LIST, 'users_branch');
         });
       }
 
@@ -440,7 +449,7 @@ export default function App() {
         const activeShiftsRef = query(collection(db, 'active_shifts'), where('branchId', '==', selectedBranch));
         unsubActiveShifts = onSnapshot(activeShiftsRef, (snapshot) => {
           const shifts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          // Check if there's an active shift for the current user
+          // Cek jika ada shift aktif untuk user saat ini
           const myShift = shifts.find((s: any) => s.userId === user?.uid);
           if (myShift) {
             setCurrentShift(myShift);
@@ -449,6 +458,8 @@ export default function App() {
             setCurrentShift(null);
             setIsShiftActive(false);
           }
+        }, (error) => {
+          handleFirestoreError(error, OperationType.LIST, 'active_shifts');
         });
       }
 
@@ -485,9 +496,11 @@ export default function App() {
           handleFirestoreError(error, OperationType.LIST, 'audit_logs');
         });
       } else if (userData?.branchId) {
-        // Employees only listen to their branch transactions
+        // Karyawan hanya mendengarkan transaksi cabang mereka
         unsubTransactions = onSnapshot(query(collection(db, 'transactions'), where('branchId', '==', userData.branchId)), (snapshot) => {
           setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        }, (error) => {
+          handleFirestoreError(error, OperationType.LIST, 'transactions_branch');
         });
       }
 
@@ -2625,7 +2638,18 @@ export default function App() {
                                   const itemRef = doc(db, `branches/${selectedBranch}/inventory`, `${viewState.product.id}_${viewState.variant.id}`);
                                   const currentData = branchInventory[`${viewState.product.id}_${viewState.variant.id}`] || { sns: [] };
                                   
-                                  if (!currentData.sns.includes(sn)) {
+                                  // Perketat Keamanan SN: Cek duplikasi Global untuk Voucher/Unit
+                if (viewState.product.category !== 'aksesoris') {
+                   const globalSnQuery = query(collectionGroup(db, 'inventory'), where('sns', 'array-contains', sn));
+                   const globalSnap = await getDocs(globalSnQuery);
+                   if (!globalSnap.empty) {
+                     setPosStatus({ message: `Gagal: SN ${sn} sudah terdaftar di cabang lain!`, type: 'error' });
+                     setTimeout(() => setPosStatus({ message: '', type: 'info' }), 3000);
+                     return;
+                   }
+                }
+
+                if (!currentData.sns.includes(sn)) {
                                     await setDoc(itemRef, {
                                       productId: viewState.product.id,
                                       variantId: viewState.variant.id,
@@ -3019,23 +3043,24 @@ export default function App() {
                     const category = itemsToSell[0].category;
 
                     if (category === 'aksesoris') {
+                      const newStock = (currentData.stock || 0) - itemsToSell.length;
+                      if (newStock < 0) throw new Error(`Stok ${itemsToSell[0].name} tidak mencukupi!`);
+                      
                       transaction.update(itemRef, {
-                        stock: Math.max(0, (currentData.stock || 0) - itemsToSell.length),
+                        stock: newStock,
                         lastUpdated: serverTimestamp()
                       });
                     } else {
                       const snsToRemove = itemsToSell.map(i => i.sn);
                       const existingSns = [...(currentData.sns || [])];
-                      const finalSns = [];
                       
-                      for (const sn of existingSns) {
-                        const idx = snsToRemove.indexOf(sn);
-                        if (idx > -1) {
-                          snsToRemove.splice(idx, 1);
-                        } else {
-                          finalSns.push(sn);
-                        }
+                      // Perketat SN: Pastikan semua SN yang akan dijual benar-benar ada di stok
+                      const missingSns = snsToRemove.filter(sn => !existingSns.includes(sn));
+                      if (missingSns.length > 0) {
+                        throw new Error(`SN ${missingSns.join(', ')} sudah tidak tersedia di stok!`);
                       }
+
+                      const finalSns = existingSns.filter(sn => !snsToRemove.includes(sn));
                       
                       transaction.update(itemRef, {
                         sns: finalSns,
@@ -3229,7 +3254,7 @@ export default function App() {
                       <p className="text-[10px] font-black text-sapphire uppercase tracking-[0.4em]">Pencarian & Scan Barcode</p>
                       <div className="flex items-center gap-2">
                         <div className={`w-2 h-2 rounded-full ${isShiftActive ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'bg-red-500'} animate-pulse`} />
-                        <span className="text-[8px] font-black text-slate-200/40 uppercase tracking-widest">{isShiftActive ? 'Ready' : 'Standby'}</span>
+                        <span className="text-[8px] font-black text-slate-200/40 uppercase tracking-widest">{isShiftActive ? 'AKTIF' : 'NON-AKTIF'}</span>
                       </div>
                     </div>
 
@@ -4052,6 +4077,12 @@ export default function App() {
           onClose={() => setShowCameraScanner(null)}
           onScan={async (rawSn) => {
             const sn = rawSn.trim();
+            if (!sn) {
+              setPosStatus({ message: 'Barcode kosong atau tidak terbaca!', type: 'error' });
+              setTimeout(() => setPosStatus({ message: '', type: 'info' }), 2000);
+              return;
+            }
+
             if (showCameraScanner === 'stock-initial') {
               setNewProduct(prev => ({ ...prev, sn }));
               setShowCameraScanner(null);
@@ -4067,6 +4098,17 @@ export default function App() {
                const itemKey = `${viewState.product.id}_${viewState.variant.id}`;
                const itemRef = doc(db, `branches/${selectedBranch}/inventory`, itemKey);
                const currentData = branchInventory[itemKey] || { sns: [] };
+               
+               // Perketat Keamanan SN: Cek duplikasi Global untuk Voucher/Unit
+               if (viewState.product.category !== 'aksesoris') {
+                  const globalSnQuery = query(collectionGroup(db, 'inventory'), where('sns', 'array-contains', sn));
+                  const globalSnap = await getDocs(globalSnQuery);
+                  if (!globalSnap.empty) {
+                    setPosStatus({ message: `Gagal: SN ${sn} sudah terdaftar di cabang lain!`, type: 'error' });
+                    setTimeout(() => setPosStatus({ message: '', type: 'info' }), 3000);
+                    return;
+                  }
+               }
                
                if (!currentData.sns.includes(sn)) {
                  await setDoc(itemRef, {
@@ -4101,13 +4143,24 @@ export default function App() {
               // Trigger scan logic (Direct SN search first)
               const trimmedSN = sn.trim();
               let found = false;
+              
+              // 1. Check direct SN first (High security for Vouchers/Physical Units)
               for (const key in branchInventory) {
                 const inv = branchInventory[key];
-                if (inv.sns.includes(trimmedSN)) {
+                if (inv.sns && inv.sns.includes(trimmedSN)) {
                   const product = products.find(p => p.id === inv.productId);
                   if (product) {
                     const variant = product.variants.find((v: any) => v.id === inv.variantId);
                     if (variant) {
+                      // Prevent duplicate in cart
+                      if (cart.some(item => item.sn === trimmedSN)) {
+                        setPosStatus({ message: `Unit SN ${trimmedSN} sudah ada di keranjang!`, type: 'error' });
+                        setTimeout(() => setPosStatus({ message: '', type: 'info' }), 2000);
+                        found = true;
+                        setShowCameraScanner(null);
+                        break;
+                      }
+
                       setCart(prev => [...prev, {
                         sn: trimmedSN,
                         productId: product.id,
@@ -4120,7 +4173,7 @@ export default function App() {
                         provider: product.provider
                       }]);
                       const displayName = product.category === 'aksesoris' ? `${product.provider} ${variant.name} ${product.name}` : `${product.name} - ${variant.name}`;
-                      setPosStatus({ message: `Scanned: ${displayName}`, type: 'success' });
+                      setPosStatus({ message: `Berhasil: ${displayName}`, type: 'success' });
                       found = true;
                       setShowCameraScanner(null); 
                       break;
@@ -4129,53 +4182,68 @@ export default function App() {
                 }
               }
 
-              // If not found in SNs, check Barcode Master (Kunci SN)
+              // 2. If not found in SNs, check Barcode Master (Kunci SN)
               if (!found) {
+                let productMatch = null;
+                let variantMatch = null;
+
                 for (const p of products) {
-                  const variantFound = p.variants?.find((v: any) => v.barcode?.trim() === trimmedSN);
-                  if (variantFound) {
-                    const invKey = `${p.id}_${variantFound.id}`;
-                    const currentInv = branchInventory[invKey];
+                  const v = p.variants?.find((v: any) => v.barcode?.trim() === trimmedSN);
+                  if (v) {
+                    productMatch = p;
+                    variantMatch = v;
+                    break;
+                  }
+                }
+
+                if (productMatch && variantMatch) {
+                  const invKey = `${productMatch.id}_${variantMatch.id}`;
+                  const currentInv = branchInventory[invKey];
+                  
+                  if (currentInv && currentInv.sns && currentInv.sns.length > 0) {
+                    // Pick the first available SN
+                    const pickedSN = currentInv.sns[0];
                     
-                    if (currentInv && currentInv.sns?.length > 0) {
-                      const pickedSN = currentInv.sns[0];
-                      setCart(prev => [...prev, {
-                        sn: pickedSN,
-                        productId: p.id,
-                        variantId: variantFound.id,
-                        name: p.name,
-                        variantName: variantFound.name,
-                        price: variantFound.sellingPrice,
-                        modal: variantFound.modalPrice || 0,
-                        category: p.category,
-                        provider: p.provider
-                      }]);
-                      const displayName = p.category === 'aksesoris' ? `${p.provider} ${variantFound.name} ${p.name}` : `${p.name} - ${variantFound.name}`;
-                      setPosStatus({ message: `Master Barcode Found: ${displayName}`, type: 'success' });
-                      found = true;
-                      setShowCameraScanner(null);
-                      break;
-                    } else {
-                      // Show product even if stock is empty as requested
-                      setViewState({
-                        category: p.category,
-                        provider: p.provider,
-                        product: p,
-                        variant: variantFound
-                      });
-                      setActiveMenu('products');
-                      setPosStatus({ message: `Produk ${p.name} Stok Kosong! Menampilkan Detail.`, type: 'info' });
-                      found = true;
-                      setShowCameraScanner(null);
-                      break;
+                    // Prevent duplicate if already picked
+                    if (cart.some(item => item.sn === pickedSN)) {
+                      setPosStatus({ message: `Stok fisik berikutnya sedang diproses!`, type: 'info' });
                     }
+
+                    setCart(prev => [...prev, {
+                      sn: pickedSN,
+                      productId: productMatch.id,
+                      variantId: variantMatch.id,
+                      name: productMatch.name,
+                      variantName: variantMatch.name,
+                      price: variantMatch.sellingPrice,
+                      modal: variantMatch.modalPrice || 0,
+                      category: productMatch.category,
+                      provider: productMatch.provider
+                    }]);
+                    const displayName = productMatch.category === 'aksesoris' ? `${productMatch.provider} ${variantMatch.name} ${productMatch.name}` : `${productMatch.name} - ${variantMatch.name}`;
+                    setPosStatus({ message: `Master Barcode: ${displayName}`, type: 'success' });
+                    found = true;
+                    setShowCameraScanner(null);
+                  } else {
+                    // Feedback: Stock is empty but product exists
+                    setViewState({
+                      category: productMatch.category,
+                      provider: productMatch.provider,
+                      product: productMatch,
+                      variant: variantMatch
+                    });
+                    setActiveMenu('products');
+                    setPosStatus({ message: `Stok produk ${productMatch.name} kosong!`, type: 'error' });
+                    found = true;
+                    setShowCameraScanner(null);
                   }
                 }
               }
 
+              // 3. Fallback: Not found anywhere
               if (!found) {
-                setPosStatus({ message: `SN / Barcode Master ${trimmedSN} tidak ditemukan!`, type: 'error' });
-                setTimeout(() => setPosStatus({ message: '', type: 'info' }), 2000);
+                setPosStatus({ message: `Barcode ${trimmedSN} tidak terdaftar!`, type: 'error' });
+                setTimeout(() => setPosStatus({ message: '', type: 'info' }), 3000);
               }
             }
           }}
