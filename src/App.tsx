@@ -78,12 +78,11 @@ export default function App() {
     if (activeMenu === 'audit_center' && selectedBranch !== newBranchId) {
       setConfirmModal({
         show: true,
-        title: "Pindah Cabang",
-        message: "Anda sedang dalam mode Audit. Perubahan cabang akan mereset auditori saat ini. Yakin?",
+        title: "Konfirmasi Cabang Audit",
+        message: "Anda akan melakukan audit pada cabang baru. Pastikan memilih cabang yang sesuai dengan fisik barang saat ini agar data sinkron. Lanjutkan?",
         onConfirm: () => {
           setSelectedBranch(newBranchId);
           localStorage.setItem('selectedBranch', newBranchId);
-          setAuditSession(prev => ({ ...prev, active: false, scannedSNs: [], results: [] }));
           setConfirmModal(prev => ({...prev, show: false}));
         }
       });
@@ -178,15 +177,8 @@ export default function App() {
   
   // ... (Audit and other state declarations truncated for brevity in thought, will include rest in replacement)
   
-  // AUDIT SESSION STATE
+  // AUDIT STATE
   const [auditQuickEditProduct, setAuditQuickEditProduct] = useState<any | null>(null);
-  const [auditSession, setAuditSession] = useState<{
-    active: boolean,
-    branchId: string | null,
-    scannedSNs: string[],
-    results: any[],
-    startTime: any
-  }>({ active: false, branchId: null, scannedSNs: [], results: [], startTime: null });
 
   const [cart, setCart] = useState<any[]>([]);
   const [posStatus, setPosStatus] = useState({ message: '', type: 'info' });
@@ -247,6 +239,7 @@ export default function App() {
       setShiftSelection(prev => ({ ...prev, userId: user.uid }));
     }
   }, [user, userData]);
+
 
   const providersList = ['Telkomsel', 'Indosat', 'XL', 'Axis', 'Three', 'Smartfren', 'Lainnya'];
   const brandsList = ['Robot', 'Vivan', 'Baseus', 'Oppo', 'Samsung', 'Vivo', 'Xiaomi', 'Rexi', 'Foomee', 'Lainnya'];
@@ -1159,58 +1152,54 @@ export default function App() {
 
   const handleAuditScan = async (snInput: string) => {
     const sn = snInput.trim();
-    try {
-      // Jika Audit Session sedang aktif & scanning SN, tetap di flow scan
-      if (auditSession.active) {
-        if (auditSession.scannedSNs.includes(sn)) {
-          setPosStatus({ message: `⚠️ SN ${sn} sudah dipindai dalam sesi ini`, type: 'info' });
-          return;
-        }
-        setAuditSession(prev => ({
-          ...prev,
-          scannedSNs: [...prev.scannedSNs, sn]
-        }));
-        setPosStatus({ message: `🎯 Terdeteksi: ${sn}`, type: 'success' });
+    if (!selectedBranch) {
+        setPosStatus({ message: "Pilih cabang terlebih dahulu untuk audit!", type: 'error' });
         return;
-      }
+    }
+    try {
+        // 1. Cari di Inventory CABANG AKTIF (langsung)
+        const branchTargetId = selectedBranch;
+        
+        // Perbaikan: gunakan query untuk mencari SN dalam inventory cabang aktif
+        const invQuery = query(
+          collection(db, `branches/${branchTargetId}/inventory`), 
+          where('sns', 'array-contains', sn)
+        );
+        const invSnap = await getDocs(invQuery);
 
-      // Mode audit biasa (Pencarian Global)
-      // 1. Cari di Inventory
-      const invQuery = query(collectionGroup(db, 'inventory'), where('sns', 'array-contains', sn));
-      const invSnap = await getDocs(invQuery);
-
-      if (!invSnap.empty) {
-        const itemData = invSnap.docs[0].data();
-        const product = products.find(p => p.id === itemData.productId);
-        const variant = product?.variants.find((v: any) => v.id === itemData.variantId);
-
-        if (product && variant) {
-          setAuditQuickEditProduct({ product, variant, sn });
-          setPosStatus({ message: `Ditemukan: ${product.name}`, type: 'success' });
+        if (!invSnap.empty) {
+          const itemData = invSnap.docs[0].data();
+          const product = products.find(p => p.id === itemData.productId);
+          const variant = product?.variants.find((v: any) => v.id === itemData.variantId);
+          
+          if (product && variant) {
+            // Langsung buka modal edit
+            setAuditQuickEditProduct({ product, variant, sn });
+            setPosStatus({ message: `🎯 Terdeteksi & Siap Ubah Stok: ${product.name}`, type: 'success' });
+            setShowCameraScanner(null);
+            return;
+          }
+        }
+        
+        // 2. Jika tidak ada di stok, cari berdasarkan "Kunci SN / Barcode Master" (Pencarian Global fallback)
+        const productWithMaster = products.find(p => p.variants?.some((v: any) => v.barcode?.trim() === sn));
+        if (productWithMaster) {
+          const variant = productWithMaster.variants.find((v: any) => v.barcode?.trim() === sn);
+          setAuditQuickEditProduct({ product: productWithMaster, variant, sn });
+          setPosStatus({ message: `Ditemukan via Kunci SN: ${productWithMaster.name}`, type: 'success' });
           setShowCameraScanner(null);
           return;
         }
-      }
 
-      // 2. Jika tidak ada di stok, cari berdasarkan "Kunci SN / Barcode Master"
-      const productWithMaster = products.find(p => p.variants?.some((v: any) => v.barcode?.trim() === sn));
-      if (productWithMaster) {
-        const variant = productWithMaster.variants.find((v: any) => v.barcode?.trim() === sn);
-        setAuditQuickEditProduct({ product: productWithMaster, variant, sn });
-        setPosStatus({ message: `Ditemukan via Kunci SN: ${productWithMaster.name}`, type: 'success' });
+        setConfirmModal({
+          show: true,
+          title: "SN Tidak Ditemukan",
+          message: `Serial Number/Barcode ${sn} tidak terdaftar di sistem.`,
+          confirmText: "Tutup",
+          onConfirm: () => setConfirmModal(prev => ({ ...prev, show: false }))
+        });
+        
         setShowCameraScanner(null);
-        return;
-      }
-
-      setConfirmModal({
-        show: true,
-        title: "SN Tidak Ditemukan",
-        message: `Serial Number/Barcode ${sn} tidak terdaftar di sistem.`,
-        confirmText: "Tutup",
-        onConfirm: () => setConfirmModal(prev => ({ ...prev, show: false }))
-      });
-      
-      setShowCameraScanner(null);
     } catch (error: any) {
       handleFirestoreError(error, OperationType.GET, 'inventory_search');
     }
@@ -3747,50 +3736,91 @@ export default function App() {
           </div>
         );
       case 'audit_center':
-        const currentAuditBranch = branches.find(b => b.id === (auditSession.branchId || selectedBranch));
-        
-        // Calculate Audit Discrepancy
-        const auditResults = auditSession.active ? (() => {
-          const branchTargetId = auditSession.branchId || selectedBranch;
-          if (!branchTargetId) return [];
-          
-          // Get all SNs expected in this branch
-          const expectedSNs: {sn: string, pName: string, vName: string, pId: string, vId: string}[] = [];
-          Object.entries(branchInventory).forEach(([key, inv]: [string, any]) => {
-            if (inv.branchId === branchTargetId && inv.sns?.length > 0) {
-              const p = products.find(prod => prod.id === inv.productId);
-              const v = p?.variants?.find((varItem: any) => varItem.id === inv.variantId);
-              inv.sns.forEach((snVal: string) => {
-                expectedSNs.push({
-                  sn: snVal,
-                  pName: p?.name || 'Unknown',
-                  vName: v?.name || v?.description || 'Unknown',
-                  pId: inv.productId,
-                  vId: inv.variantId
-                });
-              });
-            }
-          });
+        const currentAuditBranch = branches.find(b => b.id === selectedBranch);
+        return (
+          <div className="space-y-8 pb-32 animate-in fade-in duration-700">
+            <div className="flex justify-between items-end px-1">
+               <div>
+                  <p className="text-[10px] font-black text-sapphire uppercase tracking-[0.4em] mb-1">Security & Integrity</p>
+                  <h2 className="text-2xl font-black text-slate-200 tracking-widest uppercase flex items-center gap-3">
+                    Audit <span className="text-sapphire">Center</span>
+                  </h2>
+               </div>
+               <div className="flex flex-col items-end gap-1 text-right">
+                 <p className="text-[8px] text-text-dim uppercase font-black tracking-widest">Active Node</p>
+                 <div className="text-[10px] bg-[#151c2c] text-sapphire px-4 py-2 rounded-full font-black border border-white/10 uppercase tracking-widest backdrop-blur-md inline-block">
+                   {currentAuditBranch?.name || 'Pilih Cabang'}
+                 </div>
+               </div>
+            </div>
 
-          // Compare
-          const report = expectedSNs.map(ex => ({
-            ...ex,
-            found: auditSession.scannedSNs.includes(ex.sn)
-          }));
+            <div className="glass-card p-10 border-white/10 relative bg-gradient-to-br from-white/[0.03] to-transparent rounded-[2.5rem]">
+              <div className="absolute top-0 right-0 w-64 h-64 bg-sapphire/5 blur-[100px] -mr-32 -mt-32 overflow-hidden pointer-events-none" />
+              <div className="text-center space-y-8 relative z-10">
+                  <div className="w-24 h-24 bg-sapphire/10 rounded-[2rem] flex items-center justify-center mx-auto text-sapphire border border-sapphire/20">
+                    <Scan size={48} />
+                  </div>
+                  <div className="max-w-md mx-auto space-y-2">
+                    <h3 className="text-sm font-black uppercase tracking-[0.3em] text-slate-200">Mode Audit & Sync</h3>
+                    <p className="text-[10px] text-text-dim font-bold uppercase tracking-widest">SIlahkan scan kode barang untuk cek & perbarui stok fisik secara langsung</p>
+                  </div>
+                <div className="relative max-w-lg mx-auto">
+                  <input 
+                    type="text"
+                    autoFocus
+                    placeholder="SCAN BARCODE / SN..."
+                    className="w-full bg-black/60 border-2 border-white/5 p-5 sm:p-7 rounded-[2rem] text-sm font-mono tracking-widest uppercase placeholder:text-slate-200/10 focus:outline-none focus:border-sapphire/50 focus:bg-black/80 transition-all shadow-2xl"
+                    value={auditSearchQuery}
+                    onChange={(e) => setAuditSearchQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const val = (e.target as HTMLInputElement).value;
+                        if (val.trim()) {
+                          handleAuditScan(val.trim());
+                          setAuditSearchQuery('');
+                        }
+                      }
+                    }}
+                  />
+                  <div className="absolute right-8 top-1/2 -translate-y-1/2 text-sapphire/50 font-black">
+                    <Search size={22} />
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center justify-center gap-3 mt-10">
+                <button 
+                  onClick={() => setShowCameraScanner('audit')}
+                  className="px-8 py-4 rounded-2xl font-black uppercase tracking-[0.2em] text-[10px] border bg-sapphire text-white border-sapphire/30 shadow-xl shadow-sapphire/20 active:scale-[0.98] transition-all flex items-center justify-center gap-3"
+                >
+                  <Camera size={18} /> SCAN KAMERA
+                </button>
+              </div>
+            </div>
 
-          // Items scanned but NOT in expected list
-          const extraSNs = auditSession.scannedSNs.filter(s => !expectedSNs.find(ex => ex.sn === s)).map(s => {
-            // Try to identify what it is from master catalog
-            let identified = { pName: 'Unknown', vName: 'Unknown' };
-            for(const prog of products) {
-              const vFound = prog.variants?.find((vSingle: any) => vSingle.barcode === s);
-              if (vFound) { identified = { pName: prog.name, vName: vFound.name }; break; }
-            }
-            return { sn: s, ...identified, found: true, extra: true };
-          });
-
-          return [...report, ...extraSNs];
-        })() : [];
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <div className="p-6 glass-card bg-white/[0.02] border-white/5 rounded-[2rem]">
+                    <div className="flex items-center gap-3 mb-4">
+                        <Activity size={18} className="text-sapphire" />
+                        <h3 className="text-[10px] font-black text-slate-200 uppercase tracking-widest">Network Status</h3>
+                    </div>
+                    <div className="flex items-center justify-between p-4 bg-black/40 rounded-2xl border border-white/5">
+                        <p className="text-[8px] text-text-dim uppercase font-black tracking-widest">Link</p>
+                        <p className="text-[10px] font-bold text-green-500 uppercase tracking-widest">Live Audit Node</p>
+                    </div>
+                 </div>
+                 <div className="p-6 glass-card bg-white/[0.02] border-white/5 rounded-[2rem]">
+                    <div className="flex items-center gap-3 mb-4">
+                        <ShieldCheck size={18} className="text-sapphire" />
+                        <h3 className="text-[10px] font-black text-slate-200 uppercase tracking-widest">Auditor Access</h3>
+                    </div>
+                    <div className="flex items-center justify-between p-4 bg-black/40 rounded-2xl border border-white/5">
+                        <p className="text-[8px] text-text-dim uppercase font-black tracking-widest">Identity</p>
+                        <p className="text-[10px] font-bold text-slate-200 uppercase tracking-widest">{userData?.name}</p>
+                    </div>
+                 </div>
+            </div>
+          </div>
+        );
 
         return (
           <div className="space-y-8 pb-32 animate-in fade-in duration-700">
@@ -3807,55 +3837,32 @@ export default function App() {
                    {currentAuditBranch?.name || 'Central Node'}
                  </div>
                </div>
-            </div>
-
-            {/* Audit Status / Session Controls */}
-            {!auditSession.active ? (
-              <div className="glass-card p-8 border-white/10 bg-gradient-to-br from-sapphire/5 to-transparent">
-                 <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
-                    <div className="space-y-2 text-center sm:text-left">
-                       <h3 className="text-sm font-black uppercase tracking-widest text-slate-200">Mode Audit Fisik (Stock Opname)</h3>
-                       <p className="text-[10px] text-text-dim font-bold leading-relaxed max-w-sm">
-                         Mulai sesi audit untuk membandingkan stok fisik di <span className="text-sapphire">{currentAuditBranch?.name}</span> dengan data sistem Alpatpulsa.
-                       </p>
-                    </div>
-                    <button 
-                      onClick={() => {
-                        if (!selectedBranch) {
-                          setPosStatus({ message: "Pilih cabang terlebih dahulu!", type: 'error' });
-                          return;
-                        }
-                        setAuditSession({
-                          active: true,
-                          branchId: selectedBranch,
-                          scannedSNs: [],
-                          results: [],
-                          startTime: new Date()
-                        });
-                      }}
-                      className="px-8 py-4 bg-sapphire text-slate-200 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-xl shadow-sapphire/20 hover:scale-105 transition-all active:scale-95"
-                    >
-                      Mulai Sesi Audit
-                    </button>
-                 </div>
-              </div>
-            ) : (
-              <div className="glass-card p-6 border-sapphire/30 bg-sapphire/5 animate-in zoom-in-95">
+              <div className="glass-card p-6 border-sapphire/30 bg-sapphire/5">
                  <div className="flex justify-between items-center mb-6">
                     <div className="flex items-center gap-4">
                        <div className="w-12 h-12 bg-sapphire flex items-center justify-center rounded-2xl text-slate-200 shadow-lg shadow-sapphire/30">
                           <ShieldCheck size={24} />
                        </div>
                        <div>
-                          <h3 className="text-sm font-black uppercase tracking-widest text-slate-200">Sesi Audit Berjalan</h3>
-                          <p className="text-[10px] text-sapphire font-bold uppercase tracking-tighter">Branch: {currentAuditBranch?.name}</p>
+                          <h3 className="text-sm font-black uppercase tracking-widest text-slate-200">Mode Audit Fisik</h3>
+                          <p className="text-[10px] text-text-dim font-bold">Siap melakukan scan fisik di <span className="text-sapphire">{currentAuditBranch?.name}</span></p>
                        </div>
                     </div>
                     <div className="text-right">
-                       <p className="text-[10px] text-text-dim font-bold uppercase mb-1">Items Scanned</p>
-                       <p className="text-2xl font-black text-slate-200 font-mono">{auditSession.scannedSNs.length}</p>
+                        <p className="text-[8px] text-text-dim uppercase font-black mb-1">Total Terpindai</p>
+                        <p className="text-2xl font-black text-slate-200 font-mono">{auditSession.scannedSNs.length}</p>
                     </div>
                  </div>
+                 
+                 <button 
+                   onClick={() => setShowCameraScanner('audit')}
+                   className="w-full py-4 bg-sapphire text-slate-200 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-xl shadow-sapphire/20 hover:scale-[1.02] transition-all active:scale-95"
+                 >
+                   Scan Produk Baru
+                 </button>
+              </div>
+              
+              {/* REPLACED WITH SIMPLIFIED AUDIT UI ABOVE */}
 
                  <div className="grid grid-cols-2 gap-3 mb-6">
                     <div className="p-4 bg-black/40 rounded-2xl border border-white/5 text-center">
@@ -3908,153 +3915,7 @@ export default function App() {
                     </button>
                  </div>
               </div>
-            )}
 
-            {/* Scanning Area */}
-            <div className="glass-card p-12 border-white/10 relative bg-gradient-to-br from-white/[0.03] to-transparent rounded-[2rem]">
-              <div className="absolute top-0 right-0 w-64 h-64 bg-sapphire/5 blur-[100px] -mr-32 -mt-32 overflow-hidden pointer-events-none" />
-              
-              <div className="text-center space-y-8 relative z-10">
-                {auditSession.active ? (
-                  <div className="space-y-6">
-                     <div className="w-24 h-24 bg-green-500/10 rounded-[2rem] flex items-center justify-center mx-auto text-green-500 border border-green-500/20 animate-pulse">
-                        <Scan size={48} />
-                     </div>
-                     <div className="max-w-md mx-auto space-y-2">
-                        <h3 className="text-sm font-black uppercase tracking-[0.3em] text-green-500">Scan In Progress</h3>
-                        <p className="text-[10px] text-slate-200/40 font-bold uppercase tracking-widest">Silakan scan semua fisik barang di cabang ini satu per satu</p>
-                     </div>
-                  </div>
-                ) : (
-                  <>
-                  <div className="w-24 h-24 bg-sapphire/10 rounded-[2rem] flex items-center justify-center mx-auto text-sapphire border border-sapphire/20">
-                    <QrCode size={48} />
-                  </div>
-                  <div className="max-w-md mx-auto space-y-2">
-                    <h3 className="text-sm font-black uppercase tracking-[0.3em] text-slate-200">Identify Asset</h3>
-                    <p className="text-[10px] text-slate-200/40 font-bold uppercase tracking-widest">Utilize barcode master or unique serial identifier</p>
-                  </div>
-                  </>
-                )}
-                
-                <div className="relative max-w-lg mx-auto">
-                  <input 
-                    type="text"
-                    autoFocus
-                    placeholder="SCAN / INPUT CODE..."
-                    className="w-full bg-black/60 border-2 border-white/5 p-4 sm:p-6 rounded-[1.5rem] text-sm font-mono tracking-widest uppercase placeholder:text-slate-200/10 focus:outline-none focus:border-sapphire/50 focus:bg-black/80 transition-all shadow-2xl"
-                    value={auditSearchQuery}
-                    onChange={(e) => setAuditSearchQuery(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        const val = (e.target as HTMLInputElement).value;
-                        if (val.trim()) {
-                          handleAuditScan(val.trim());
-                          setAuditSearchQuery('');
-                        }
-                      }
-                    }}
-                  />
-                  <div className="absolute right-6 top-1/2 -translate-y-1/2 text-sapphire/50">
-                    <Search size={20} />
-                  </div>
-
-                  {/* Real-time Results Audit */}
-                  {auditSearchQuery.trim().length >= 2 && (
-                    <div className="absolute top-full left-0 right-0 mt-4 z-[100] glass-card bg-[#0A0A0B] border border-white/10 p-2 max-h-80 overflow-y-auto shadow-[0_30px_100px_rgba(0,0,0,0.8)] rounded-[2rem] scrollbar-hide">
-                      {products
-                        .flatMap(p => (p.variants || []).map((v: any) => ({ ...v, pName: p.name, pProvider: p.provider, pCategory: p.category, pId: p.id, productFull: p })))
-                        .filter(v => 
-                          v.pName.toLowerCase().includes(auditSearchQuery.toLowerCase()) || 
-                          v.name.toLowerCase().includes(auditSearchQuery.toLowerCase()) ||
-                          (v.barcode && v.barcode.toLowerCase().includes(auditSearchQuery.toLowerCase()))
-                        )
-                        .slice(0, 10)
-                        .map((v, i) => (
-                          <button 
-                            key={`${v.id}-${i}`}
-                            onClick={() => {
-                              setViewState({
-                                category: v.pCategory,
-                                provider: v.pProvider,
-                                product: v.productFull,
-                                variant: v
-                              });
-                              setActiveMenu('products');
-                              setAuditSearchQuery('');
-                            }}
-                            className="w-full text-left p-4 hover:bg-[#151c2c] rounded-2xl transition-all border border-transparent hover:border-white/5"
-                          >
-                            <div className="flex justify-between items-center">
-                              <div>
-                                <p className="text-[9px] font-black text-sapphire uppercase tracking-widest">{v.pProvider}</p>
-                                <p className="text-xs font-bold text-slate-200">{v.pName} <span className="text-slate-200/50">{v.name}</span></p>
-                                {v.barcode && <p className="text-[9px] text-slate-200/20 mt-1 font-mono tracking-widest">REF: {v.barcode}</p>}
-                              </div>
-                              <div className="text-right">
-                                <p className={`text-[9px] font-black uppercase ${(branchInventory[`${v.pId}_${v.id}`]?.sns?.length || 0) > 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                  QNT: {branchInventory[`${v.pId}_${v.id}`]?.sns?.length || 0}
-                                </p>
-                              </div>
-                            </div>
-                          </button>
-                        ))
-                      }
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-3 w-full max-w-lg mx-auto mt-8">
-                <button 
-                  onClick={() => setShowCameraScanner('audit')}
-                  className="py-6 rounded-[2rem] font-black uppercase tracking-[0.3em] text-[10px] border bg-[#151c2c] text-slate-200 hover:text-sapphire border-white/10 hover:border-sapphire/30 shadow-xl active:scale-[0.98] transition-all flex items-center justify-center gap-4"
-                >
-                  <Camera size={18} /> Scan Produk (Audit)
-                </button>
-                <div className="grid grid-cols-2 gap-3">
-                  <button onClick={() => setActiveMenu('products')} className="py-4 rounded-2xl bg-sapphire/10 text-sapphire border border-sapphire/20 font-bold uppercase tracking-widest text-[9px]">Tambah Stok</button>
-                  <button onClick={() => setShowCameraScanner('stock-initial')} className="py-4 rounded-2xl bg-sapphire/10 text-sapphire border border-sapphire/20 font-bold uppercase tracking-widest text-[9px]">Input SN Voucher</button>
-                </div>
-              </div>
-            </div>
-
-            {/* DISCREPANCY REPORT FOR SESSION */}
-            {auditSession.active && auditResults.length > 0 && (
-              <div className="space-y-6">
-                 <div className="flex items-center gap-4 px-2">
-                    <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
-                    <p className="text-[9px] font-black text-slate-200/30 uppercase tracking-[0.4em]">Audit Intelligence Report</p>
-                    <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
-                 </div>
-
-                 <div className="grid gap-3">
-                    {auditResults.filter((r: any) => !r.found || r.extra).map((res: any, idx: number) => (
-                      <div key={idx} className={`p-4 rounded-2xl border flex flex-col gap-3 ${res.extra ? 'bg-yellow-500/5 border-yellow-500/20' : 'bg-red-500/5 border-red-500/20'}`}>
-                         <div className="flex items-center justify-between">
-                           <div className="flex items-center gap-4">
-                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${res.extra ? 'bg-yellow-500/10 text-yellow-500' : 'bg-red-500/10 text-red-500'}`}>
-                                 {res.extra ? <Plus size={18} /> : <AlertTriangle size={18} />}
-                              </div>
-                              <div>
-                                 <p className="text-[10px] font-black text-slate-200 uppercase tracking-tight">{res.pName} - {res.vName}</p>
-                                 <p className="text-[9px] font-mono text-slate-200/40 tracking-widest">{res.sn}</p>
-                                 <p className="text-[9px] text-text-dim">Stok Sistem: {res.expectedStock || 0}</p>
-                              </div>
-                           </div>
-                           <span className={`text-[8px] font-black uppercase px-3 py-1 rounded-full ${res.extra ? 'bg-yellow-500 text-black' : 'bg-red-500 text-white'}`}>
-                              {res.extra ? 'Data Lebih' : 'Data Kurang'}
-                           </span>
-                         </div>
-                         <div className="flex items-center gap-2 pt-2 border-t border-white/5">
-                           <input type="text" placeholder="Catatan audit..." className="flex-1 bg-black/40 p-2 rounded-lg text-xs" />
-                           <button className="px-4 py-2 bg-sapphire/20 text-sapphire rounded-lg text-xs font-bold">Simpan</button>
-                         </div>
-                      </div>
-                    ))}
-                 </div>
-              </div>
-            )}
 
           </div>
         );
@@ -4562,6 +4423,7 @@ export default function App() {
           variant={auditQuickEditProduct.variant}
           sn={auditQuickEditProduct.sn}
           selectedBranch={selectedBranch}
+          userData={userData}
           onClose={() => setAuditQuickEditProduct(null)}
         />
       )}

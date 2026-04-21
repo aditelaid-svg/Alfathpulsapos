@@ -49,12 +49,19 @@ service cloud.firestore {
     // Fortress Rules
     // ===============================================================
     match /{document=**} { allow read, write: if false; }
+    
+    // Explicitly allow collectionGroup query for inventory search
+    match /{path=**}/inventory/{itemId} {
+      allow read: if isVerified() && (isAdmin() || isAudit() || isEmployee());
+    }
+
+    // Helper to check if user has access to a resource based on branch
+    function hasBranchAccess(resourceBranchId) {
+      return isAdmin() || isAudit() || (isEmployee() && resourceBranchId == getUserBranchId());
+    }
 
     match /users/{userId} {
-      allow read: if isValidId(userId) && isVerified() && (
-        request.auth.uid == userId || isAdmin() || isAudit() || 
-        (getUserBranchId() == resource.data.branchId)
-      );
+      allow read: if isVerified() && (isAdmin() || isAudit() || isEmployee());
       allow create: if isValidId(userId) && isVerified() && request.auth.uid == userId && incoming().email == request.auth.token.email;
       allow update: if isValidId(userId) && isVerified() && (
         (request.auth.uid == userId && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'email'])) || 
@@ -63,45 +70,47 @@ service cloud.firestore {
     }
 
     match /products/{productId} {
-      allow read: if isValidId(productId) && isVerified();
+      allow read: if isVerified() && (isAdmin() || isAudit() || isEmployee());
       allow create, update: if isValidId(productId) && isAdmin() && isValidProduct(incoming());
       allow delete: if isValidId(productId) && isAdmin();
     }
 
     match /branches/{branchId} {
-      allow read: if isValidId(branchId) && isVerified();
+      allow read: if isVerified() && (isAdmin() || isAudit() || isEmployee());
       allow write: if isValidId(branchId) && isAdmin();
+
+      match /inventory/{itemId} {
+        allow read: if isVerified() && hasBranchAccess(branchId);
+        allow create, update, delete: if isVerified() && hasBranchAccess(branchId);
+      }
     }
 
-    match /branches/{branchId}/inventory/{itemId} {
-      allow read: if isValidId(branchId) && isValidId(itemId) && isVerified() && (isAdmin() || isAudit() || getUserBranchId() == branchId);
-      
-      allow update: if isValidId(branchId) && isValidId(itemId) && isVerified() && (isAdmin() || isAudit() || (
-        getUserBranchId() == branchId &&
-        incoming().stock >= 0 &&
-        incoming().stock < resource.data.stock // Strictly consumption/decrease
-      ));
-      
-      allow create, delete: if isValidId(branchId) && isValidId(itemId) && (isAdmin() || isAudit());
+    match /active_shifts/{shiftId} {
+      allow read: if isVerified() && (isAdmin() || isAudit() || isEmployee());
     }
 
-    match /transactions/{transactionId} {
-      allow read: if isValidId(transactionId) && isVerified() && (isAdmin() || isAudit() || resource.data.branchId == getUserBranchId());
-      
-      allow create: if isValidId(transactionId) && isVerified() && isEmployee() && 
-        incoming().branchId == getUserBranchId() &&
-        incoming().employeeId == request.auth.uid &&
-        incoming().totalAmount > 0;
-    }
-
-    match /transfers/{transferId} {
-      allow read: if isValidId(transferId) && isVerified() && (isAdmin() || isAudit());
-      allow create: if isValidId(transferId) && isVerified() && isEmployee() && incoming().fromBranchId == getUserBranchId();
+    match /handovers/{handoverId} {
+      allow read: if isVerified() && (isAdmin() || isAudit() || isEmployee());
     }
 
     match /disposals/{disposalId} {
-      allow read: if isValidId(disposalId) && isVerified() && (isAdmin() || isAudit());
-      allow create: if isValidId(disposalId) && isVerified() && isEmployee() && incoming().branchId == getUserBranchId();
+      allow read: if isVerified() && (isAdmin() || isAudit() || isEmployee());
+      allow create: if isVerified() && isEmployee() && incoming().branchId == getUserBranchId();
+    }
+
+    match /audit_logs/{logId} {
+      allow read: if isVerified() && (isAdmin() || isAudit() || isEmployee());
+      allow create: if isVerified() && (isAdmin() || isAudit() || isEmployee());
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isVerified() && (isAdmin() || isAudit() || isEmployee());
+      allow create: if isVerified() && isEmployee() && incoming().branchId == getUserBranchId() && incoming().employeeId == request.auth.uid && incoming().totalAmount > 0;
+    }
+
+    match /transfers/{transferId} {
+      allow read: if isVerified() && (isAdmin() || isAudit() || isEmployee());
+      allow create: if isVerified() && isEmployee() && incoming().fromBranchId == getUserBranchId();
     }
   }
 }

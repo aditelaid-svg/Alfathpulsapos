@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, Package, Tag, Hash, Plus, Minus } from 'lucide-react';
-import { doc, getDoc, updateDoc, serverTimestamp, arrayUnion, arrayRemove } from 'firebase/firestore';                
+import { doc, getDoc, updateDoc, setDoc, serverTimestamp, arrayUnion, arrayRemove, collection, addDoc } from 'firebase/firestore';                
 import { db } from '../firebase';
 
 interface AuditQuickEditModalProps {
@@ -9,10 +9,27 @@ interface AuditQuickEditModalProps {
   sn: string;
   onClose: () => void;
   selectedBranch: string | null;
+  userData: any;
 }
 
-export const AuditQuickEditModal: React.FC<AuditQuickEditModalProps> = ({ product, variant, sn, onClose, selectedBranch }) => {
-  const [adjustment, setAdjustment] = useState(0);
+export const AuditQuickEditModal: React.FC<AuditQuickEditModalProps> = ({ product, variant, sn, onClose, selectedBranch, userData }) => {
+  const [adjustment, setAdjustment] = useState(1);
+  const [currentBranchStock, setCurrentBranchStock] = useState<number | null>(null);
+
+  React.useEffect(() => {
+    const fetchStock = async () => {
+      if (!selectedBranch) return;
+      const invKey = `${product.id}_${variant.id}`;
+      const invRef = doc(db, `branches/${selectedBranch}/inventory`, invKey);
+      const snap = await getDoc(invRef);
+      if (snap.exists()) {
+        setCurrentBranchStock(snap.data().stock || 0);
+      } else {
+        setCurrentBranchStock(0);
+      }
+    };
+    fetchStock();
+  }, [selectedBranch, product.id, variant.id]);
 
   const handleUpdateStock = async (type: 'add' | 'subtract') => {
     if (!selectedBranch) return;
@@ -20,24 +37,57 @@ export const AuditQuickEditModal: React.FC<AuditQuickEditModalProps> = ({ produc
     const invRef = doc(db, `branches/${selectedBranch}/inventory`, invKey);
     const snap = await getDoc(invRef);
     
-    if (snap.exists()) {
-      const data = snap.data();
-      const currentStock = data.stock || 0;
-      const newStock = type === 'add' ? currentStock + adjustment : currentStock - adjustment;
-      
-      const updateData: any = {
-        stock: newStock,
-        lastUpdated: serverTimestamp()
-      };
+    const currentStock = snap.exists() ? snap.data().stock || 0 : 0;
+    const currentSns = snap.exists() ? snap.data().sns || [] : [];
+    const newStock = type === 'add' ? currentStock + adjustment : Math.max(0, currentStock - adjustment);
+    
+    const updateData: any = {
+      productId: product.id,
+      variantId: variant.id,
+      stock: newStock,
+      lastUpdated: serverTimestamp()
+    };
 
-      // Voucher: Sync SNs | Aksesoris: Just update stock count
-      if (product.category === 'voucher' || product.category === 'kuota') {
-          updateData.sns = type === 'add' ? arrayUnion(`AUTO_${Date.now()}`) : arrayRemove(data.sns?.[data.sns.length - 1] || '');
-      }
-      
-      await updateDoc(invRef, updateData);
-      onClose();
+    if (product.category === 'voucher' || product.category === 'kuota') {
+        if (type === 'add') {
+          // Add SN if it doesn't exist, or duplicate if it's a generic scan
+          updateData.sns = arrayUnion(sn);
+        } else {
+          // Remove specific SN if subtracting
+          updateData.sns = arrayRemove(sn);
+        }
     }
+    
+    if (snap.exists()) {
+      await updateDoc(invRef, updateData);
+    } else {
+      await setDoc(invRef, {
+        ...updateData,
+        sns: type === 'add' ? [sn] : []
+      });
+    }
+
+    // 3. Log Audit
+    try {
+      await addDoc(collection(db, 'audit_logs'), {
+        action: 'quick_audit_adjustment',
+        type,
+        adjustment,
+        sn,
+        productId: product.id,
+        variantId: variant.id,
+        productName: product.name,
+        variantName: variant.name,
+        branchId: selectedBranch,
+        userId: userData?.uid || 'unknown',
+        userName: userData?.name || 'Unknown',
+        timestamp: serverTimestamp()
+      });
+    } catch (e) {
+      console.error("Audit log failed:", e);
+    }
+
+    onClose();
   };
 
   return (
@@ -54,7 +104,11 @@ export const AuditQuickEditModal: React.FC<AuditQuickEditModalProps> = ({ produc
         <div className="space-y-1">
             <p className="text-[10px] text-sapphire font-black uppercase tracking-widest">{product.name}</p>
             <p className="text-xs font-bold text-slate-200">{variant.name}</p>
-            <p className="text-[9px] text-text-dim font-mono tracking-widest mt-1">SN: {sn}</p>
+            <div className="flex items-center justify-between mt-2 p-3 bg-white/5 rounded-xl border border-white/5">
+                <span className="text-[9px] text-text-dim uppercase font-black">Stok Sistem</span>
+                <span className="text-sm font-black text-slate-200">{currentBranchStock !== null ? currentBranchStock : '...'}</span>
+            </div>
+            <p className="text-[9px] text-text-dim font-mono tracking-widest mt-1">REF: {sn}</p>
         </div>
 
         <div className="space-y-2">
