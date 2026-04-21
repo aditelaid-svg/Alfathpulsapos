@@ -455,7 +455,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (userData?.isApproved || userData?.role === 'admin') {
+    if (userData?.isApproved || userData?.role === 'admin' || userData?.role === 'audit') {
       const unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
         setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       }, (error) => {
@@ -583,7 +583,7 @@ export default function App() {
   }, [userData]);
 
   useEffect(() => {
-    if (selectedBranch && (userData?.isApproved || userData?.role === 'admin')) {
+    if (selectedBranch && (userData?.isApproved || userData?.role === 'admin' || userData?.role === 'audit')) {
       const unsubInventory = onSnapshot(collection(db, `branches/${selectedBranch}/inventory`), (snapshot) => {
         const inv: any = {};
         snapshot.docs.forEach(doc => {
@@ -3374,10 +3374,10 @@ export default function App() {
                                   onClick={() => {
                                     const invKey = `${v.pId}_${v.id}`;
                                     const currentInv = branchInventory[invKey];
-                                    const hasStock = v.pCategory === 'aksesoris' ? (currentInv?.stock > 0) : (currentInv?.sns?.length > 0);
+                                    const hasStock = currentInv && currentInv.stock > 0;
                                     
                                     if (hasStock) {
-                                      const pickedSN = (v.pCategory === 'aksesoris') ? v.barcode : (currentInv.sns?.[0] || v.barcode);
+                                      const pickedSN = currentInv.sns?.[0] || v.barcode;
                                       setCart(prev => [...prev, {
                                         sn: pickedSN,
                                         productId: v.pId,

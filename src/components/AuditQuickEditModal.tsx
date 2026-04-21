@@ -44,6 +44,7 @@ export const AuditQuickEditModal: React.FC<AuditQuickEditModalProps> = ({ produc
     const updateData: any = {
       productId: product.id,
       variantId: variant.id,
+      branchId: selectedBranch,
       stock: newStock,
       lastUpdated: serverTimestamp()
     };

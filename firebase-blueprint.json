@@ -110,6 +110,34 @@
         "reason": { "type": "string", "enum": ["broken", "return", "lost"] },
         "reportedBy": { "type": "string" }
       }
+    },
+    "Handover": {
+      "title": "Shift Handover",
+      "description": "Daily cash reconciliation report",
+      "type": "object",
+      "properties": {
+        "branchId": { "type": "string" },
+        "employeeId": { "type": "string" },
+        "employeeName": { "type": "string" },
+        "shift": { "type": "string" },
+        "totalVoucher": { "type": "number" },
+        "totalAksesoris": { "type": "number" },
+        "totalCalculated": { "type": "number" },
+        "cashReported": { "type": "number" },
+        "diff": { "type": "number" },
+        "notes": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      }
+    },
+    "ActiveShift": {
+      "title": "Active Shift",
+      "description": "Currently active employee shift",
+      "type": "object",
+      "properties": {
+        "employeeId": { "type": "string" },
+        "branchId": { "type": "string" },
+        "startTime": { "type": "string", "format": "date-time" }
+      }
     }
   },
   "firestore": {
@@ -119,6 +147,8 @@
     "/branches/{branchId}/inventory/{itemId}": { "schema": "InventoryItem", "description": "Local stock" },
     "/transactions/{transactionId}": { "schema": "Transaction", "description": "Sales history" },
     "/transfers/{transferId}": { "schema": "StockTransfer", "description": "Stock transfers" },
-    "/disposals/{disposalId}": { "schema": "StockDisposal", "description": "Faulty/Returned goods" }
+    "/disposals/{disposalId}": { "schema": "StockDisposal", "description": "Faulty/Returned goods" },
+    "/handovers/{handoverId}": { "schema": "Handover", "description": "Cash reports" },
+    "/active_shifts/{shiftId}": { "schema": "ActiveShift", "description": "Live shifts" }
   }
 }

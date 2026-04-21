@@ -45,6 +45,19 @@ service cloud.firestore {
              data.variants is list && data.variants.size() <= 50;
     }
 
+    function isValidHandover(data) {
+      return data.branchId is string &&
+             data.employeeId == request.auth.uid &&
+             data.employeeName is string &&
+             data.shift in ['pagi', 'siang', 'malam'] &&
+             data.totalVoucher is number &&
+             data.totalAksesoris is number &&
+             data.totalCalculated is number &&
+             data.cashReported is number &&
+             data.diff is number &&
+             data.timestamp == request.time;
+    }
+
     // ===============================================================
     // Fortress Rules
     // ===============================================================
@@ -61,7 +74,7 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read: if isVerified() && (isAdmin() || isAudit() || isEmployee());
+      allow read: if isVerified() && (request.auth.uid == userId || isAdmin() || isAudit() || isEmployee());
       allow create: if isValidId(userId) && isVerified() && request.auth.uid == userId && incoming().email == request.auth.token.email;
       allow update: if isValidId(userId) && isVerified() && (
         (request.auth.uid == userId && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'email'])) || 
@@ -87,10 +100,14 @@ service cloud.firestore {
 
     match /active_shifts/{shiftId} {
       allow read: if isVerified() && (isAdmin() || isAudit() || isEmployee());
+      allow create: if isVerified() && isEmployee() && incoming().employeeId == request.auth.uid;
+      allow delete: if isVerified() && (isAdmin() || (isEmployee() && existing().employeeId == request.auth.uid));
     }
 
     match /handovers/{handoverId} {
       allow read: if isVerified() && (isAdmin() || isAudit() || isEmployee());
+      allow create: if isVerified() && isEmployee() && isValidHandover(incoming());
+      allow delete: if isAdmin();
     }
 
     match /disposals/{disposalId} {
