@@ -887,7 +887,7 @@ export default function App() {
         const currentData = branchInventory[`${pId}_${variantId}`] || { sns: [] };
         
         let newSns = [...currentData.sns];
-        let qtyToAdd = newProduct.category === 'aksesoris' ? (newProduct.qty > 0 ? newProduct.qty : 1) : 1;
+        let qtyToAdd = newProduct.qty > 0 ? newProduct.qty : 1;
 
         if (newProduct.sn) {
           // If SN is provided, add it multiple times based on qty (Batch mode logic for aksesoris)
@@ -1177,7 +1177,8 @@ export default function App() {
           if (product && variant) {
             // Langsung buka modal edit
             setAuditQuickEditProduct({ product, variant, sn });
-            setPosStatus({ message: `🎯 Terdeteksi & Siap Ubah Stok: ${product.name}`, type: 'success' });
+            const displayName = `${product.provider} ${variant.name} ${product.name}`;
+            setPosStatus({ message: `🎯 Terdeteksi: ${displayName}`, type: 'success' });
             setShowCameraScanner(null);
             return;
           }
@@ -3014,7 +3015,7 @@ export default function App() {
             let found = false;
             for (const key in branchInventory) {
               const inv = branchInventory[key];
-              if (inv.sns.includes(sn)) {
+              if (inv.sns && Array.isArray(inv.sns) && inv.sns.includes(sn)) {
                 const product = products.find(p => p.id === inv.productId);
                 if (product) {
                   const variant = product.variants.find((v: any) => v.id === inv.variantId);
@@ -3030,7 +3031,7 @@ export default function App() {
                       category: product.category,
                       provider: product.provider
                     }]);
-                    const displayName = product.category === 'aksesoris' ? `${product.provider} ${variant.name} ${product.name}` : `${product.name} - ${variant.name}`;
+                    const displayName = `${product.provider} ${variant.name} ${product.name}`;
                     setPosStatus({ message: `Scanned: ${displayName}`, type: 'success' });
                     found = true;
                     break;
@@ -3047,10 +3048,13 @@ export default function App() {
                   const invKey = `${p.id}_${variantFound.id}`;
                   const currentInv = branchInventory[invKey];
                   
-                  // For accessories, we allow selling if numeric stock > 0
-                  if (currentInv && (p.category === 'aksesoris' ? currentInv.stock > 0 : currentInv.sns?.length > 0)) {
-                    // Use barcode as SN for accessories if no specific SN exists
-                    const pickedSN = (p.category === 'aksesoris') ? variantFound.barcode : (currentInv.sns?.[0] || variantFound.barcode);
+                  // Allow selling if numeric stock > 0 for all categories
+                  // Use Barcode Master as the primary identifier if SN is also just a barcode
+                  const hasStock = currentInv && currentInv.stock > 0;
+                  
+                  if (hasStock) {
+                    // Pick an SN if available, otherwise use barcode
+                    const pickedSN = currentInv.sns?.[0] || variantFound.barcode;
                     setCart(prev => [...prev, {
                       sn: pickedSN,
                       productId: p.id,
@@ -3062,7 +3066,7 @@ export default function App() {
                       category: p.category,
                       provider: p.provider
                     }]);
-                    const displayName = p.category === 'aksesoris' ? `${p.provider} ${variantFound.name} ${p.name}` : `${p.name} - ${variantFound.name}`;
+                    const displayName = `${p.provider} ${variantFound.name} ${p.name}`;
                     setPosStatus({ message: `Produk Ditemukan: ${displayName}`, type: 'success' });
                     found = true;
                     break;
@@ -3135,33 +3139,23 @@ export default function App() {
                 const itemDoc = await transaction.get(itemRef);
                 if (!itemDoc.exists()) throw new Error("Stok tidak ditemukan");
                 const currentData = itemDoc.data();
-                const category = itemsToSell[0].category;
-
-                if (category === 'aksesoris') {
-                  const newStock = (currentData.stock || 0) - itemsToSell.length;
-                  if (newStock < 0) throw new Error(`Stok ${itemsToSell[0].name} tidak mencukupi!`);
-                  
-                  transaction.update(itemRef, {
-                    stock: newStock,
-                    lastUpdated: serverTimestamp()
-                  });
-                } else {
-                  const snsToRemove = itemsToSell.map(i => i.sn);
-                  const existingSns = [...(currentData.sns || [])];
-                  
-                  const missingSns = snsToRemove.filter(sn => !existingSns.includes(sn));
-                  if (missingSns.length > 0) {
-                    throw new Error(`SN ${missingSns.join(', ')} sudah tidak tersedia di stok!`);
-                  }
-
-                  const finalSns = existingSns.filter(sn => !snsToRemove.includes(sn));
-                  
-                  transaction.update(itemRef, {
-                    sns: finalSns,
-                    stock: finalSns.length,
-                    lastUpdated: serverTimestamp()
-                  });
+                
+                const snsToRemove = itemsToSell.map(i => i.sn);
+                const existingSns = [...(currentData.sns || [])];
+                
+                // Unify update: All categories update both sns array (if items exist) and numeric stock
+                const finalSns = existingSns.filter(sn => !snsToRemove.includes(sn));
+                const newStock = Math.max(0, (currentData.stock || 0) - itemsToSell.length);
+                
+                if ((currentData.stock || 0) < itemsToSell.length) {
+                  throw new Error(`Stok ${itemsToSell[0].name} tidak mencukupi! (Sisa: ${currentData.stock || 0})`);
                 }
+
+                transaction.update(itemRef, {
+                  sns: finalSns,
+                  stock: newStock,
+                  lastUpdated: serverTimestamp()
+                });
               }
 
               // Add transaction document
@@ -3832,104 +3826,6 @@ export default function App() {
             </div>
           </div>
         );
-
-        return (
-          <div className="space-y-8 pb-32 animate-in fade-in duration-700">
-            <div className="flex justify-between items-end px-1">
-               <div>
-                  <p className="text-[10px] font-black text-sapphire uppercase tracking-[0.4em] mb-1">Security & Integrity</p>
-                  <h2 className="text-2xl font-black text-slate-200 tracking-widest uppercase flex items-center gap-3">
-                    Audit <span className="text-sapphire">Center</span>
-                  </h2>
-               </div>
-               <div className="flex flex-col items-end gap-1">
-                 <p className="text-[8px] text-text-dim uppercase font-black tracking-widest">Active Node</p>
-                 <div className="text-[10px] bg-[#151c2c] text-sapphire px-4 py-2 rounded-full font-black border border-white/10 uppercase tracking-widest backdrop-blur-md">
-                   {currentAuditBranch?.name || 'Central Node'}
-                 </div>
-               </div>
-              <div className="glass-card p-6 border-sapphire/30 bg-sapphire/5">
-                 <div className="flex justify-between items-center mb-6">
-                    <div className="flex items-center gap-4">
-                       <div className="w-12 h-12 bg-sapphire flex items-center justify-center rounded-2xl text-slate-200 shadow-lg shadow-sapphire/30">
-                          <ShieldCheck size={24} />
-                       </div>
-                       <div>
-                          <h3 className="text-sm font-black uppercase tracking-widest text-slate-200">Mode Audit Fisik</h3>
-                          <p className="text-[10px] text-text-dim font-bold">Siap melakukan scan fisik di <span className="text-sapphire">{currentAuditBranch?.name}</span></p>
-                       </div>
-                    </div>
-                    <div className="text-right">
-                        <p className="text-[8px] text-text-dim uppercase font-black mb-1">Total Terpindai</p>
-                        <p className="text-2xl font-black text-slate-200 font-mono">{auditSession.scannedSNs.length}</p>
-                    </div>
-                 </div>
-                 
-                 <button 
-                   onClick={() => setShowCameraScanner('audit')}
-                   className="w-full py-4 bg-sapphire text-slate-200 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-xl shadow-sapphire/20 hover:scale-[1.02] transition-all active:scale-95"
-                 >
-                   Scan Produk Baru
-                 </button>
-              </div>
-              
-              {/* REPLACED WITH SIMPLIFIED AUDIT UI ABOVE */}
-
-                 <div className="grid grid-cols-2 gap-3 mb-6">
-                    <div className="p-4 bg-black/40 rounded-2xl border border-white/5 text-center">
-                       <p className="text-[8px] text-text-dim uppercase font-black mb-1">Cocok (Matched)</p>
-                       <p className="text-xl font-black text-green-500">{auditResults.filter((r: any) => r.found && !r.extra).length}</p>
-                    </div>
-                    <div className="p-4 bg-black/40 rounded-2xl border border-white/5 text-center">
-                       <p className="text-[8px] text-text-dim uppercase font-black mb-1">Selisih (Missing)</p>
-                       <p className="text-xl font-black text-red-500">{auditResults.filter((r: any) => !r.found).length}</p>
-                    </div>
-                 </div>
-
-                 <div className="flex gap-3">
-                    <button 
-                      onClick={async () => {
-                        // Log the audit
-                        try {
-                          await addDoc(collection(db, 'audit_logs'), {
-                            action: 'physical_audit',
-                            userName: userData?.name || 'Unknown Auditor',
-                            userId: auth.currentUser?.uid,
-                            branchId: auditSession.branchId,
-                            timestamp: serverTimestamp(),
-                            details: {
-                              branchName: branches.find(b => b.id === auditSession.branchId)?.name,
-                              totalScanned: auditSession.scannedSNs.length,
-                              matched: auditResults.filter((r: any) => r.found && !r.extra).length,
-                              missing: auditResults.filter((r: any) => !r.found).length,
-                              extra: auditResults.filter((r: any) => r.extra).length,
-                              startTime: auditSession.startTime
-                            }
-                          });
-                          setAuditSession({ active: false, branchId: null, scannedSNs: [], results: [], startTime: null });
-                          setPosStatus({ message: "Laporan Audit Berhasil Disimpan!", type: 'success' });
-                          setActiveMenu('history');
-                          setHistoryTab('audit');
-                        } catch (e) {
-                          console.error(e);
-                        }
-                      }}
-                      className="flex-1 bg-green-500 text-slate-200 py-4 rounded-xl font-black uppercase text-[10px] tracking-widest shadow-lg shadow-green-500/20 active:scale-95 transition-all"
-                    >
-                      Selesaikan & Simpan Laporan
-                    </button>
-                    <button 
-                      onClick={() => setAuditSession({ active: false, branchId: null, scannedSNs: [], results: [], startTime: null })}
-                      className="px-6 py-4 border border-white/10 rounded-xl text-[10px] font-black uppercase text-text-dim hover:bg-white/5 transition-all"
-                    >
-                      Batal
-                    </button>
-                 </div>
-              </div>
-
-
-          </div>
-        );
       case 'history':
         const filteredTransactions = transactions.filter(t => 
           userData?.role === 'admin' || userData?.role === 'audit' || t.branchId === userData?.branchId
@@ -4350,7 +4246,7 @@ export default function App() {
                         category: product.category,
                         provider: product.provider
                       }]);
-                      const displayName = product.category === 'aksesoris' ? `${product.provider} ${variant.name} ${product.name}` : `${product.name} - ${variant.name}`;
+                      const displayName = `${product.provider} ${variant.name} ${product.name}`;
                       setPosStatus({ message: `Berhasil: ${displayName}`, type: 'success' });
                       found = true;
                       setShowCameraScanner(null); 

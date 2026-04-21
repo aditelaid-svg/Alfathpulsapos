@@ -48,14 +48,16 @@ export const AuditQuickEditModal: React.FC<AuditQuickEditModalProps> = ({ produc
       lastUpdated: serverTimestamp()
     };
 
-    if (product.category === 'voucher' || product.category === 'kuota') {
-        if (type === 'add') {
-          // Add SN if it doesn't exist, or duplicate if it's a generic scan
-          updateData.sns = arrayUnion(sn);
-        } else {
-          // Remove specific SN if subtracting
-          updateData.sns = arrayRemove(sn);
-        }
+    // Unify update: Always update numeric stock and optionally track individual SNs
+    // If a type has SN tracking (sns array), update it for all categories consistently.
+    if (type === 'add') {
+      if (sn && sn !== "") {
+        updateData.sns = arrayUnion(sn);
+      }
+    } else {
+      if (sn && sn !== "") {
+        updateData.sns = arrayRemove(sn);
+      }
     }
     
     if (snap.exists()) {
@@ -63,7 +65,7 @@ export const AuditQuickEditModal: React.FC<AuditQuickEditModalProps> = ({ produc
     } else {
       await setDoc(invRef, {
         ...updateData,
-        sns: type === 'add' ? [sn] : []
+        sns: (type === 'add' && sn && sn !== "") ? [sn] : []
       });
     }
 
