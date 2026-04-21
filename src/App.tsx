@@ -70,7 +70,27 @@ export default function App() {
   const [user, setUser] = useState(auth.currentUser);
   const [userData, setUserData] = useState<any>(null);
   const [activeMenu, setActiveMenu] = useState('dashboard');
-  const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
+  const [selectedBranch, setSelectedBranch] = useState<string | null>(() => localStorage.getItem('selectedBranch'));
+
+  // Wrapper for branch selection with audit confirmation and persistence
+  const handleBranchChange = (newBranchId: string) => {
+    if (activeMenu === 'audit_center' && selectedBranch !== newBranchId) {
+      setConfirmModal({
+        show: true,
+        title: "Pindah Cabang",
+        message: "Anda sedang dalam mode Audit. Perubahan cabang akan mereset auditori saat ini. Yakin?",
+        onConfirm: () => {
+          setSelectedBranch(newBranchId);
+          localStorage.setItem('selectedBranch', newBranchId);
+          setAuditSession(prev => ({ ...prev, active: false, scannedSNs: [], results: [] }));
+          setConfirmModal(prev => ({...prev, show: false}));
+        }
+      });
+    } else {
+      setSelectedBranch(newBranchId);
+      localStorage.setItem('selectedBranch', newBranchId);
+    }
+  };
   const [branchInventory, setBranchInventory] = useState<any>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('voucher');
@@ -155,6 +175,8 @@ export default function App() {
   const [posSearchQuery, setPosSearchQuery] = useState('');
   const [auditSearchQuery, setAuditSearchQuery] = useState('');
   
+  // ... (Audit and other state declarations truncated for brevity in thought, will include rest in replacement)
+  
   // AUDIT SESSION STATE
   const [auditSession, setAuditSession] = useState<{
     active: boolean,
@@ -167,6 +189,37 @@ export default function App() {
   const [cart, setCart] = useState<any[]>([]);
   const [posStatus, setPosStatus] = useState({ message: '', type: 'info' });
   const [showCameraScanner, setShowCameraScanner] = useState<'stock' | 'pos' | 'stock-initial' | 'audit' | 'barcode-master' | null>(null);
+
+  // Global Bluetooth Scanner Listener
+  useEffect(() => {
+    let buffer = '';
+    let timeout: NodeJS.Timeout;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if camera scanner is active
+      if (showCameraScanner) return;
+      // Ignore if typing in input fields
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      if (e.key === 'Enter') {
+        if (buffer.trim()) {
+          // Process the scanned SN
+          setPosScannerInput(buffer.trim());
+          // Add your logic to handle the scanned item here (e.g., search/auto-add to cart)
+          console.log("Global Scanned:", buffer.trim());
+        }
+        buffer = '';
+      } else if (e.key.length === 1) { // Only add alphanumeric/standard chars
+        buffer += e.key;
+        clearTimeout(timeout);
+        timeout = setTimeout(() => { buffer = ''; }, 200); // Reset if too slow
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showCameraScanner]);
+
   const [transactions, setTransactions] = useState<any[]>([]);
   const [transfers, setTransfers] = useState<any[]>([]);
   const [disposals, setDisposals] = useState<any[]>([]);
@@ -1366,7 +1419,7 @@ export default function App() {
                      <select 
                        className="appearance-none bg-slate-800 border border-slate-700 text-slate-200 text-[10px] font-bold px-4 py-2 pr-8 rounded-full focus:outline-none focus:border-sapphire transition-all cursor-pointer"
                        value={selectedBranch || ''} 
-                       onChange={e => setSelectedBranch(e.target.value)}
+                       onChange={e => handleBranchChange(e.target.value)}
                      >
                        {branches.sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric: true})).map(b => (
                          <option key={b.id} value={b.id}>{b.name}</option>
@@ -3964,16 +4017,18 @@ export default function App() {
                 </div>
               </div>
 
-              <button 
-                onClick={() => setShowCameraScanner('audit')}
-                className={`w-full max-w-lg mx-auto mt-8 py-6 rounded-[2rem] font-black uppercase tracking-[0.3em] text-[10px] border shadow-xl active:scale-[0.98] transition-all flex items-center justify-center gap-4 ${
-                  auditSession.active 
-                    ? 'bg-green-500/10 text-green-400 border-green-500/30' 
-                    : 'bg-[#151c2c] text-slate-200 hover:text-sapphire border-white/10 hover:border-sapphire/30'
-                }`}
-              >
-                <Camera size={18} /> {auditSession.active ? 'Lanjutkan Scan Opname' : 'Initialize Scanner'}
-              </button>
+              <div className="flex flex-col gap-3 w-full max-w-lg mx-auto mt-8">
+                <button 
+                  onClick={() => setShowCameraScanner('audit')}
+                  className="py-6 rounded-[2rem] font-black uppercase tracking-[0.3em] text-[10px] border bg-[#151c2c] text-slate-200 hover:text-sapphire border-white/10 hover:border-sapphire/30 shadow-xl active:scale-[0.98] transition-all flex items-center justify-center gap-4"
+                >
+                  <Camera size={18} /> Scan Produk (Audit)
+                </button>
+                <div className="grid grid-cols-2 gap-3">
+                  <button onClick={() => setActiveMenu('products')} className="py-4 rounded-2xl bg-sapphire/10 text-sapphire border border-sapphire/20 font-bold uppercase tracking-widest text-[9px]">Tambah Stok</button>
+                  <button onClick={() => setShowCameraScanner('stock-initial')} className="py-4 rounded-2xl bg-sapphire/10 text-sapphire border border-sapphire/20 font-bold uppercase tracking-widest text-[9px]">Input SN Voucher</button>
+                </div>
+              </div>
             </div>
 
             {/* DISCREPANCY REPORT FOR SESSION */}
