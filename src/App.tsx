@@ -4041,27 +4041,29 @@ export default function App() {
                  </div>
 
                  <div className="grid gap-3">
-                    {auditResults.filter((r: any) => !r.found || r.extra).slice(0, 20).map((res: any, idx: number) => (
-                      <div key={idx} className={`p-4 rounded-2xl border flex items-center justify-between ${res.extra ? 'bg-yellow-500/5 border-yellow-500/20' : 'bg-red-500/5 border-red-500/20'}`}>
-                         <div className="flex items-center gap-4">
-                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${res.extra ? 'bg-yellow-500/10 text-yellow-500' : 'bg-red-500/10 text-red-500'}`}>
-                               {res.extra ? <Plus size={18} /> : <AlertTriangle size={18} />}
-                            </div>
-                            <div>
-                               <p className="text-[10px] font-black text-slate-200 uppercase tracking-tight">{res.pName} - {res.vName}</p>
-                               <p className="text-[9px] font-mono text-slate-200/40 tracking-widest">{res.sn}</p>
-                            </div>
+                    {auditResults.filter((r: any) => !r.found || r.extra).map((res: any, idx: number) => (
+                      <div key={idx} className={`p-4 rounded-2xl border flex flex-col gap-3 ${res.extra ? 'bg-yellow-500/5 border-yellow-500/20' : 'bg-red-500/5 border-red-500/20'}`}>
+                         <div className="flex items-center justify-between">
+                           <div className="flex items-center gap-4">
+                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${res.extra ? 'bg-yellow-500/10 text-yellow-500' : 'bg-red-500/10 text-red-500'}`}>
+                                 {res.extra ? <Plus size={18} /> : <AlertTriangle size={18} />}
+                              </div>
+                              <div>
+                                 <p className="text-[10px] font-black text-slate-200 uppercase tracking-tight">{res.pName} - {res.vName}</p>
+                                 <p className="text-[9px] font-mono text-slate-200/40 tracking-widest">{res.sn}</p>
+                                 <p className="text-[9px] text-text-dim">Stok Sistem: {res.expectedStock || 0}</p>
+                              </div>
+                           </div>
+                           <span className={`text-[8px] font-black uppercase px-3 py-1 rounded-full ${res.extra ? 'bg-yellow-500 text-black' : 'bg-red-500 text-white'}`}>
+                              {res.extra ? 'Data Lebih' : 'Data Kurang'}
+                           </span>
                          </div>
-                         <div className="text-right">
-                            <span className={`text-[8px] font-black uppercase px-3 py-1 rounded-full ${res.extra ? 'bg-yellow-500 text-black' : 'bg-red-500 text-white'}`}>
-                               {res.extra ? 'Kelebihan' : 'Hilang/Belum Scan'}
-                            </span>
+                         <div className="flex items-center gap-2 pt-2 border-t border-white/5">
+                           <input type="text" placeholder="Catatan audit..." className="flex-1 bg-black/40 p-2 rounded-lg text-xs" />
+                           <button className="px-4 py-2 bg-sapphire/20 text-sapphire rounded-lg text-xs font-bold">Simpan</button>
                          </div>
                       </div>
                     ))}
-                    {auditResults.filter((r: any) => !r.found || r.extra).length > 20 && (
-                      <p className="text-center text-[8px] text-text-dim uppercase font-bold py-2">... and {auditResults.filter((r: any) => !r.found || r.extra).length - 20} more discrepancies</p>
-                    )}
                  </div>
               </div>
             )}
