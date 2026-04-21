@@ -11,6 +11,7 @@ import { collection, onSnapshot, addDoc, serverTimestamp, doc, setDoc, updateDoc
 import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { Sun, Moon, LayoutDashboard, ShoppingCart, Package, Store, Settings, Plus, ChevronRight, Hash, QrCode, UserCheck, ShieldAlert, MapPin, Trash2, Camera, X, Sparkles, ArrowLeftRight, RotateCcw, FileText, History, LogOut, TrendingUp, Wallet, PieChart, Activity, Coins, FileSpreadsheet, AlertTriangle, Pencil, ShieldCheck, Search, Scan, ChevronDown, BarChart3, LayoutGrid, ArrowRight, Lock } from 'lucide-react';
 import CameraScanner from './components/CameraScanner';
+import { AuditQuickEditModal } from './components/AuditQuickEditModal';
 
 enum OperationType {
   CREATE = 'create',
@@ -178,6 +179,7 @@ export default function App() {
   // ... (Audit and other state declarations truncated for brevity in thought, will include rest in replacement)
   
   // AUDIT SESSION STATE
+  const [auditQuickEditProduct, setAuditQuickEditProduct] = useState<any | null>(null);
   const [auditSession, setAuditSession] = useState<{
     active: boolean,
     branchId: string | null,
@@ -1158,7 +1160,7 @@ export default function App() {
   const handleAuditScan = async (snInput: string) => {
     const sn = snInput.trim();
     try {
-      // Jika Audit Session sedang aktif, tambahkan ke scanned list
+      // Jika Audit Session sedang aktif & scanning SN, tetap di flow scan
       if (auditSession.active) {
         if (auditSession.scannedSNs.includes(sn)) {
           setPosStatus({ message: `⚠️ SN ${sn} sudah dipindai dalam sesi ini`, type: 'info' });
@@ -1173,7 +1175,7 @@ export default function App() {
       }
 
       // Mode audit biasa (Pencarian Global)
-      // 1. Cari di Inventory (Stok Aktif)
+      // 1. Cari di Inventory
       const invQuery = query(collectionGroup(db, 'inventory'), where('sns', 'array-contains', sn));
       const invSnap = await getDocs(invQuery);
 
@@ -1183,33 +1185,19 @@ export default function App() {
         const variant = product?.variants.find((v: any) => v.id === itemData.variantId);
 
         if (product && variant) {
-          setViewState({
-             category: product.category,
-             provider: product.provider,
-             product: product,
-             variant: variant
-          });
-          setActiveMenu('products'); // Jump to products to show the modal
-          setPosStatus({ message: `Ditemukan di Inventaris: ${product.name}`, type: 'success' });
-          setTimeout(() => setPosStatus({ message: '', type: 'info' }), 3000);
+          setAuditQuickEditProduct({ product, variant, sn });
+          setPosStatus({ message: `Ditemukan: ${product.name}`, type: 'success' });
           setShowCameraScanner(null);
           return;
         }
       }
 
-      // 2. Jika tidak ada di stok, cari berdasarkan "Kunci SN / Barcode Master" (Khusus Aksesoris/Voucher)
+      // 2. Jika tidak ada di stok, cari berdasarkan "Kunci SN / Barcode Master"
       const productWithMaster = products.find(p => p.variants?.some((v: any) => v.barcode?.trim() === sn));
       if (productWithMaster) {
         const variant = productWithMaster.variants.find((v: any) => v.barcode?.trim() === sn);
-        setViewState({
-          category: productWithMaster.category,
-          provider: productWithMaster.provider,
-          product: productWithMaster,
-          variant: variant
-        });
-        setActiveMenu('products'); // Jump to products to show the modal
+        setAuditQuickEditProduct({ product: productWithMaster, variant, sn });
         setPosStatus({ message: `Ditemukan via Kunci SN: ${productWithMaster.name}`, type: 'success' });
-        setTimeout(() => setPosStatus({ message: '', type: 'info' }), 3000);
         setShowCameraScanner(null);
         return;
       }
@@ -4565,6 +4553,16 @@ export default function App() {
               }
             }
           }}
+        />
+      )}
+
+      {auditQuickEditProduct && (
+        <AuditQuickEditModal
+          product={auditQuickEditProduct.product}
+          variant={auditQuickEditProduct.variant}
+          sn={auditQuickEditProduct.sn}
+          selectedBranch={selectedBranch}
+          onClose={() => setAuditQuickEditProduct(null)}
         />
       )}
       
