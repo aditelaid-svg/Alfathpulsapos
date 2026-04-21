@@ -12,6 +12,7 @@ import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { Sun, Moon, LayoutDashboard, ShoppingCart, Package, Store, Settings, Plus, ChevronRight, Hash, QrCode, UserCheck, ShieldAlert, MapPin, Trash2, Camera, X, Sparkles, ArrowLeftRight, RotateCcw, FileText, History, LogOut, TrendingUp, Wallet, PieChart, Activity, Coins, FileSpreadsheet, AlertTriangle, Pencil, ShieldCheck, Search, Scan, ChevronDown, BarChart3, LayoutGrid, ArrowRight, Lock } from 'lucide-react';
 import CameraScanner from './components/CameraScanner';
 import { AuditQuickEditModal } from './components/AuditQuickEditModal';
+import { PosPaymentModal } from './components/PosPaymentModal';
 
 enum OperationType {
   CREATE = 'create',
@@ -225,6 +226,7 @@ export default function App() {
   const [showDisposalModal, setShowDisposalModal] = useState(false);
   const [disposalConfig, setDisposalConfig] = useState({ productId: '', variantId: '', sns: [] as string[], reason: 'broken' });
   const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [posPaymentConfig, setPosPaymentConfig] = useState({ show: false, amountPaid: 0 });
   const [lastTransaction, setLastTransaction] = useState<any>(null);
   const [handovers, setHandovers] = useState<any[]>([]);
   const [showHandoverModal, setShowHandoverModal] = useState(false);
@@ -3086,98 +3088,97 @@ export default function App() {
 
         const totalCart = cart.reduce((acc, curr) => acc + curr.price, 0);
 
-        const checkout = async () => {
+        const startPayment = () => {
           if (cart.length === 0) return;
-          
-          setConfirmModal({
-            show: true,
-            title: "Konfirmasi Penjualan",
-            message: `Selesaikan penjualan ${cart.length} item dengan total ${formatRupiah(totalCart)}? Stok akan otomatis dikurangi.`,
-            onConfirm: async () => {
-              try {
-                // Group by inventory key to update
-                const updates: Record<string, any[]> = {};
-                cart.forEach(item => {
-                  const key = `${item.productId}_${item.variantId}`;
-                  if (!updates[key]) updates[key] = [];
-                  updates[key].push(item);
-                });
+          setPosPaymentConfig({ show: true, amountPaid: 0 });
+        };
 
-                const txRef = doc(collection(db, 'transactions'));
-                
-                await runTransaction(db, async (transaction) => {
-                  for (const key in updates) {
-                    const itemsToSell = updates[key];
-                    const itemRef = doc(db, `branches/${selectedBranch}/inventory`, key);
-                    const itemDoc = await transaction.get(itemRef);
-                    if (!itemDoc.exists()) throw new Error("Stok tidak ditemukan");
-                    const currentData = itemDoc.data();
-                    const category = itemsToSell[0].category;
+        const processCheckout = async (amountPaid: number) => {
+          try {
+            // Group by inventory key to update
+            const updates: Record<string, any[]> = {};
+            cart.forEach(item => {
+              const key = `${item.productId}_${item.variantId}`;
+              if (!updates[key]) updates[key] = [];
+              updates[key].push(item);
+            });
 
-                    if (category === 'aksesoris') {
-                      const newStock = (currentData.stock || 0) - itemsToSell.length;
-                      if (newStock < 0) throw new Error(`Stok ${itemsToSell[0].name} tidak mencukupi!`);
-                      
-                      transaction.update(itemRef, {
-                        stock: newStock,
-                        lastUpdated: serverTimestamp()
-                      });
-                    } else {
-                      const snsToRemove = itemsToSell.map(i => i.sn);
-                      const existingSns = [...(currentData.sns || [])];
-                      
-                      const missingSns = snsToRemove.filter(sn => !existingSns.includes(sn));
-                      if (missingSns.length > 0) {
-                        throw new Error(`SN ${missingSns.join(', ')} sudah tidak tersedia di stok!`);
-                      }
+            const txRef = doc(collection(db, 'transactions'));
+            const txData = {
+              branchId: selectedBranch,
+              branchName: branches.find(b => b.id === selectedBranch)?.name || 'Unknown',
+              employeeId: auth.currentUser?.uid,
+              employeeName: userData?.name || 'Staff',
+              items: cart.map(item => ({
+                productId: item.productId,
+                variantId: item.variantId,
+                sn: item.sn,
+                name: item.name,
+                variantName: item.variantName,
+                price: item.price,
+                modal: item.modal || 0,
+                category: item.category,
+                provider: item.provider
+              })),
+              totalAmount: totalCart,
+              totalProfit: cart.reduce((acc, curr) => acc + (curr.price - (curr.modal || 0)), 0),
+              amountPaid,
+              change: amountPaid - totalCart,
+              status: 'success',
+              timestamp: serverTimestamp()
+            };
 
-                      const finalSns = existingSns.filter(sn => !snsToRemove.includes(sn));
-                      
-                      transaction.update(itemRef, {
-                        sns: finalSns,
-                        stock: finalSns.length,
-                        lastUpdated: serverTimestamp()
-                      });
-                    }
+            await runTransaction(db, async (transaction) => {
+              for (const key in updates) {
+                const itemsToSell = updates[key];
+                const itemRef = doc(db, `branches/${selectedBranch}/inventory`, key);
+                const itemDoc = await transaction.get(itemRef);
+                if (!itemDoc.exists()) throw new Error("Stok tidak ditemukan");
+                const currentData = itemDoc.data();
+                const category = itemsToSell[0].category;
+
+                if (category === 'aksesoris') {
+                  const newStock = (currentData.stock || 0) - itemsToSell.length;
+                  if (newStock < 0) throw new Error(`Stok ${itemsToSell[0].name} tidak mencukupi!`);
+                  
+                  transaction.update(itemRef, {
+                    stock: newStock,
+                    lastUpdated: serverTimestamp()
+                  });
+                } else {
+                  const snsToRemove = itemsToSell.map(i => i.sn);
+                  const existingSns = [...(currentData.sns || [])];
+                  
+                  const missingSns = snsToRemove.filter(sn => !existingSns.includes(sn));
+                  if (missingSns.length > 0) {
+                    throw new Error(`SN ${missingSns.join(', ')} sudah tidak tersedia di stok!`);
                   }
 
-                  // Add transaction document inside the transaction
-                  const txData = {
-                    branchId: selectedBranch,
-                    branchName: branches.find(b => b.id === selectedBranch)?.name || 'Unknown',
-                    employeeId: auth.currentUser?.uid,
-                    employeeName: userData?.name || 'Staff',
-                    items: cart.map(item => ({
-                      productId: item.productId,
-                      variantId: item.variantId,
-                      sn: item.sn,
-                      name: item.name,
-                      variantName: item.variantName,
-                      price: item.price,
-                      modal: item.modal || 0,
-                      category: item.category,
-                      provider: item.provider
-                    })),
-                    totalAmount: totalCart,
-                    totalProfit: cart.reduce((acc, curr) => acc + (curr.price - (curr.modal || 0)), 0),
-                    status: 'success',
-                    timestamp: serverTimestamp()
-                  };
-                  transaction.set(txRef, txData);
-                });
-
-                // Create receipt snapshot (using the doc id from txRef)
-                setLastTransaction({ id: txRef.id, ...txData, timestamp: new Date() });
-                
-                setCart([]);
-                setPosStatus({ message: "Penjualan Berhasil Disimpan!", type: 'success' });
-                setShowReceiptModal(true);
-                setConfirmModal(prev => ({ ...prev, show: false }));
-              } catch (error: any) {
-                handleFirestoreError(error, OperationType.WRITE, `branches/${selectedBranch}/inventory`);
+                  const finalSns = existingSns.filter(sn => !snsToRemove.includes(sn));
+                  
+                  transaction.update(itemRef, {
+                    sns: finalSns,
+                    stock: finalSns.length,
+                    lastUpdated: serverTimestamp()
+                  });
+                }
               }
-            }
-          });
+
+              // Add transaction document
+              transaction.set(txRef, txData);
+            });
+
+            // Create receipt snapshot
+            setLastTransaction({ id: txRef.id, ...txData, timestamp: new Date() });
+            
+            setCart([]);
+            setPosStatus({ message: "Penjualan Berhasil Disimpan!", type: 'success' });
+            setShowReceiptModal(true);
+            setPosPaymentConfig({ show: false, amountPaid: 0 });
+          } catch (error: any) {
+            handleFirestoreError(error, OperationType.WRITE, `branches/${selectedBranch}/inventory`);
+            setPosStatus({ message: error.message || "Gagal memproses transaksi", type: 'error' });
+          }
         };
 
         return (
@@ -3522,7 +3523,7 @@ export default function App() {
                     </p>
                   </div>
                   <button 
-                    onClick={checkout}
+                    onClick={startPayment}
                     className="w-full py-6 bg-sapphire text-slate-200 rounded-[2rem] font-black uppercase tracking-[0.5em] text-xs shadow-[0_15px_40px_rgba(37,99,235,0.4)] hover:shadow-[0_15px_60px_rgba(37,99,235,0.6)] hover:-translate-y-1 active:scale-[0.98] transition-all flex items-center justify-center gap-4 sm:p-6"
                   >
                     Confirm & Authorize Payment
@@ -3530,6 +3531,16 @@ export default function App() {
                   </button>
                 </div>
               </motion.div>
+            )}
+
+            {posPaymentConfig.show && (
+              <PosPaymentModal 
+                total={totalCart}
+                itemCount={cart.length}
+                formatRupiah={formatRupiah}
+                onClose={() => setPosPaymentConfig({ show: false, amountPaid: 0 })}
+                onConfirm={processCheckout}
+              />
             )}
           </div>
         );
